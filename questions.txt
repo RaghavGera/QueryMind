@@ -1,0 +1,473 @@
+1. SIMPLE LOOKUPS (15 Questions)
+
+  ID: Q001
+  Category: SIMPLE_LOOKUP
+  Question: How many customers do we have?
+
+  ID: Q002
+  Category: SIMPLE_LOOKUP
+  Question: How many products are available in our catalog?
+
+  ID: Q003
+  Category: SIMPLE_LOOKUP
+  Question: How many orders have been placed so far?
+
+  ID: Q004
+  Category: SIMPLE_LOOKUP
+  Question: What are all the product categories we have?
+
+  ID: Q005
+  Category: SIMPLE_LOOKUP
+  Question: Which countries do our customers come from?
+
+  ID: Q006
+  Category: SIMPLE_LOOKUP
+  Question: How many orders are currently pending?
+
+  ID: Q007
+  Category: SIMPLE_LOOKUP
+  Question: What is the most expensive product we sell?
+
+  ID: Q008
+  Category: SIMPLE_LOOKUP
+  Question: What is the cheapest product in our store?
+
+  ID: Q009
+  Category: SIMPLE_LOOKUP
+  Question: How many cancelled orders do we have?
+
+  ID: Q010
+  Category: SIMPLE_LOOKUP
+  Question: Show me all customers from India.
+
+  ID: Q011
+  Category: SIMPLE_LOOKUP
+  Question: How many products do we have in the Electronics category?
+
+  ID: Q012
+  Category: SIMPLE_LOOKUP
+  Question: What is the email address for the customer named John Smith?
+
+  ID: Q013
+  Category: SIMPLE_LOOKUP
+  Question: How many completed orders are there?
+
+  ID: Q014
+  Category: SIMPLE_LOOKUP
+  Question: List all products that cost more than $500.
+
+  ID: Q015
+  Category: SIMPLE_LOOKUP
+  Question: How many customers signed up this year?
+
+  ---
+
+  2. AGGREGATIONS (15 Questions)
+
+  ID: Q016
+  Category: AGGREGATION
+  Question: What is our total revenue from all orders?
+
+  ID: Q017
+  Category: AGGREGATION
+  Question: What is the average order value?
+
+  ID: Q018
+  Category: AGGREGATION
+  Question: How many items have been sold in total?
+
+  ID: Q019
+  Category: AGGREGATION
+  Question: What is the average number of items per order?
+
+  ID: Q020
+  Category: AGGREGATION
+  Question: What is the total number of units sold for each product category?
+
+  ID: Q021
+  Category: AGGREGATION
+  Question: What is the highest single order value we've ever had?
+
+  ID: Q022
+  Category: AGGREGATION
+  Question: What is the average product price across all categories?
+
+  ID: Q023
+  Category: AGGREGATION
+  Question: How much does each customer spend on average?
+
+  ID: Q024
+  Category: AGGREGATION
+  Question: What is the lowest order value we've received?
+
+  ID: Q025
+  Category: AGGREGATION
+  Question: How many orders does each customer place on average?
+
+  ID: Q026
+  Category: AGGREGATION
+  Question: What is the total revenue per product category?
+
+  ID: Q027
+  Category: AGGREGATION
+  Question: What percentage of our orders are cancelled?
+
+  ID: Q028
+  Category: AGGREGATION
+  Question: What is the average revenue per customer?
+
+  ID: Q029
+  Category: AGGREGATION
+  Question: How many distinct products have been ordered at least once?
+
+  ID: Q030
+  Category: AGGREGATION
+  Question: What is the median order size in terms of number of items?
+
+  ---
+
+  3. TIME-BASED QUESTIONS (15 Questions)
+
+  ID: Q031
+  Category: TIME_BASED
+  Question: How many orders were placed last month?
+
+  ID: Q032
+  Category: TIME_BASED
+  Question: What was our revenue this month so far?
+
+  ID: Q033
+  Category: TIME_BASED
+  Question: How many new customers signed up in the last 3 months?
+
+  ID: Q034
+  Category: TIME_BASED
+  Question: Show me the orders from the past 30 days.
+
+  ID: Q035
+  Category: TIME_BASED
+  Question: What were the monthly order counts for this year?
+
+  ID: Q036
+  Category: TIME_BASED
+  Question: Which month had the highest revenue since January?
+
+  ID: Q037
+  Category: TIME_BASED
+  Question: How many orders did we get this week?
+
+  ID: Q038
+  Category: TIME_BASED
+  Question: What was the revenue trend over the last 6 months?
+
+  ID: Q039
+  Category: TIME_BASED
+  Question: How many customers have placed an order recently?
+
+  ID: Q040
+  Category: TIME_BASED
+  Question: What products were ordered the most during the previous quarter?
+
+  ID: Q041
+  Category: TIME_BASED
+  Question: How many orders were cancelled in the last 90 days?
+
+  ID: Q042
+  Category: TIME_BASED
+  Question: What was our total revenue for Q1 this year?
+
+  ID: Q043
+  Category: TIME_BASED
+  Question: How many customers signed up last week?
+
+  ID: Q044
+  Category: TIME_BASED
+  Question: Compare the number of orders between this month and last month.
+
+  ID: Q045
+  Category: TIME_BASED
+  Question: What were the daily order totals for the past two weeks?
+
+  ---
+
+  4. CUSTOMER ANALYSIS (15 Questions)
+
+  ID: Q046
+  Category: CUSTOMER_ANALYSIS
+  Question: Who are our top 10 highest-spending customers?
+
+  ID: Q047
+  Category: CUSTOMER_ANALYSIS
+  Question: Which customers have never placed an order?
+
+  ID: Q048
+  Category: CUSTOMER_ANALYSIS
+  Question: Which customers have placed more than 10 orders?
+
+  ID: Q049
+  Category: CUSTOMER_ANALYSIS
+  Question: Who are our most frequent buyers?
+
+  ID: Q050
+  Category: CUSTOMER_ANALYSIS
+  Question: Show me customers who have only placed one order.
+
+  ID: Q051
+  Category: CUSTOMER_ANALYSIS
+  Question: Which customers have ordered products from at least 3 different categories?
+
+  ID: Q052
+  Category: CUSTOMER_ANALYSIS
+  Question: List the customers who haven't ordered anything in the last 6 months.
+
+  ID: Q053
+  Category: CUSTOMER_ANALYSIS
+  Question: What is the repeat purchase rate among our customers?
+
+  ID: Q054
+  Category: CUSTOMER_ANALYSIS
+  Question: Who placed the single largest order by total value?
+
+  ID: Q055
+  Category: CUSTOMER_ANALYSIS
+  Question: How many customers placed at least one order this year?
+
+  ID: Q056
+  Category: CUSTOMER_ANALYSIS
+  Question: Which customers always buy products from the same category?
+
+  ID: Q057
+  Category: CUSTOMER_ANALYSIS
+  Question: What percentage of our customers have placed at least one order?
+
+  ID: Q058
+  Category: CUSTOMER_ANALYSIS
+  Question: Show me the top 5 customers by number of items purchased.
+
+  ID: Q059
+  Category: CUSTOMER_ANALYSIS
+  Question: Which customers signed up more than a year ago but have never ordered?
+
+  ID: Q060
+  Category: CUSTOMER_ANALYSIS
+  Question: How many customers have ordered more than $1,000 worth of products in total?
+
+  ---
+
+  5. PRODUCT ANALYSIS (10 Questions)
+
+  ID: Q061
+  Category: PRODUCT_ANALYSIS
+  Question: Which are our top 5 best-selling products?
+
+  ID: Q062
+  Category: PRODUCT_ANALYSIS
+  Question: Which product category generates the most revenue?
+
+  ID: Q063
+  Category: PRODUCT_ANALYSIS
+  Question: Are there any products that have never been ordered?
+
+  ID: Q064
+  Category: PRODUCT_ANALYSIS
+  Question: What is the average price of products in each category?
+
+  ID: Q065
+  Category: PRODUCT_ANALYSIS
+  Question: Which product has the highest quantity sold in a single order?
+
+  ID: Q066
+  Category: PRODUCT_ANALYSIS
+  Question: What is the revenue breakdown by product category?
+
+  ID: Q067
+  Category: PRODUCT_ANALYSIS
+  Question: Which products are frequently bought together in the same order?
+
+  ID: Q068
+  Category: PRODUCT_ANALYSIS
+  Question: What is the price range within each product category?
+
+  ID: Q069
+  Category: PRODUCT_ANALYSIS
+  Question: Which products have seen a decline in orders over the past 3 months?
+
+  ID: Q070
+  Category: PRODUCT_ANALYSIS
+  Question: How many different customers have purchased each product?
+
+  ---
+
+  6. COUNTRY/GEOGRAPHY ANALYSIS (10 Questions)
+
+  ID: Q071
+  Category: COUNTRY_ANALYSIS
+  Question: Which country has the most customers?
+
+  ID: Q072
+  Category: COUNTRY_ANALYSIS
+  Question: Which country generates the most revenue?
+
+  ID: Q073
+  Category: COUNTRY_ANALYSIS
+  Question: How many customers are from each country?
+
+  ID: Q074
+  Category: COUNTRY_ANALYSIS
+  Question: What is the average order value by country?
+
+  ID: Q075
+  Category: COUNTRY_ANALYSIS
+  Question: Which country has the highest number of cancelled orders?
+
+  ID: Q076
+  Category: COUNTRY_ANALYSIS
+  Question: What is the most popular product category in each country?
+
+  ID: Q077
+  Category: COUNTRY_ANALYSIS
+  Question: How many orders come from customers in the United States?
+
+  ID: Q078
+  Category: COUNTRY_ANALYSIS
+  Question: What percentage of total revenue comes from each country?
+
+  ID: Q079
+  Category: COUNTRY_ANALYSIS
+  Question: Which country has the highest average spending per customer?
+
+  ID: Q080
+  Category: COUNTRY_ANALYSIS
+  Question: How many customers from the UK have placed more than 5 orders?
+
+  ---
+
+  7. COMPARISON QUESTIONS (10 Questions)
+
+  ID: Q081
+  Category: COMPARISON
+  Question: Do customers from India spend more than customers from the UK on average?
+
+  ID: Q082
+  Category: COMPARISON
+  Question: Which category sells more — Electronics or Clothing?
+
+  ID: Q083
+  Category: COMPARISON
+  Question: Is the average order value higher for repeat customers compared to one-time buyers?
+
+  ID: Q084
+  Category: COMPARISON
+  Question: Which month had more orders — June or July?
+
+  ID: Q085
+  Category: COMPARISON
+  Question: Do customers who signed up in the last 6 months order more frequently than older customers?
+
+  ID: Q086
+  Category: COMPARISON
+  Question: Which product category has a higher cancellation rate?
+
+  ID: Q087
+  Category: COMPARISON
+  Question: Are orders getting bigger or smaller over the past year?
+
+  ID: Q088
+  Category: COMPARISON
+  Question: Do customers from the US buy more expensive products than customers from Germany?
+
+  ID: Q089
+  Category: COMPARISON
+  Question: How does this quarter's revenue compare to the previous quarter?
+
+  ID: Q090
+  Category: COMPARISON
+  Question: Is the number of new customer signups increasing or decreasing month over month?
+
+  ---
+
+  8. AMBIGUOUS QUESTIONS (10 Questions)
+
+  ID: Q091
+  Category: AMBIGUOUS
+  Question: How many new customers did we get last month?
+  Ambiguity:
+  A. Customers whose signup date was last month
+  B. Customers who placed their first-ever order last month
+  C. Customers who became active (placed any order) for the first time last month
+
+  ID: Q092
+  Category: AMBIGUOUS
+  Question: What were our sales last month?
+  Ambiguity:
+  A. Total monetary value of all orders placed last month
+  B. Total monetary value of only completed orders last month
+  C. Total number of orders placed last month
+
+  ID: Q093
+  Category: AMBIGUOUS
+  Question: Who are our best customers?
+  Ambiguity:
+  A. Customers who have spent the most money in total
+  B. Customers who have placed the most orders (highest frequency)
+  C. Customers who have the highest average order value
+
+  ID: Q094
+  Category: AMBIGUOUS
+  Question: Which products are performing well?
+  Ambiguity:
+  A. Products with the highest total units sold
+  B. Products generating the highest total revenue
+  C. Products with the fastest-growing sales trend over recent months
+
+  ID: Q095
+  Category: AMBIGUOUS
+  Question: Show me inactive customers.
+  Ambiguity:
+  A. Customers who have never placed any order
+  B. Customers who haven't placed an order in the last 3 months
+  C. Customers who haven't placed an order in the last 6 months
+
+  ID: Q096
+  Category: AMBIGUOUS
+  Question: What is our conversion rate?
+  Ambiguity:
+  A. Percentage of registered customers who have placed at least one order
+  B. Percentage of orders that are completed (not cancelled or pending)
+  C. Ratio of repeat customers to total customers
+
+  ID: Q097
+  Category: AMBIGUOUS
+  Question: How much did we make from Electronics last quarter?
+  Ambiguity:
+  A. Total revenue from all orders containing Electronics products last quarter
+  B. Total revenue from only completed orders containing Electronics products last quarter
+  C. Total revenue specifically from the Electronics product items (excluding non-Electronics items in mixed orders)
+
+  ID: Q098
+  Category: AMBIGUOUS
+  Question: Which country is doing the best?
+  Ambiguity:
+  A. Country with the highest total revenue
+  B. Country with the most customers
+  C. Country with the highest average spend per customer
+
+  ID: Q099
+  Category: AMBIGUOUS
+  Question: How many repeat customers do we have?
+  Ambiguity:
+  A. Customers who have placed 2 or more orders ever
+  B. Customers who have placed 2 or more orders within the last 12 months
+  C. Customers who have placed orders in 2 or more distinct months
+
+  ID: Q100
+  Category: AMBIGUOUS
+  Question: What is the return rate on our orders?
+  Ambiguity:
+  A. Percentage of orders with status "cancelled" out of all orders
+  B. Percentage of orders with status "cancelled" out of completed + cancelled orders
+  C. Rate at which customers come back to place another order (repeat purchase rate)
+
+
+omniroute --log
+claude

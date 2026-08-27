@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python test_phase2.py)",
+      "Bash(grep -n \"✓\\\\|✗\\\\|⚠\\\\|⊘\\\\|→\" \"D:\\\\\\\\PROJECTS\\\\\\\\Text to SQL\\\\\\\\test_phase2.py\")",
+      "WebSearch",
+      "WebFetch(domain:console.groq.com)",
+      "Bash(curl -s https://api.groq.com/openai/v1/models)",
+      "Bash(python test_phase3.py)",
+      "Bash(python test_ambiguity_realworld.py)"
+    ]
+  }
+}

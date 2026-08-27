@@ -1,0 +1,42 @@
+                    USER
+                      │
+                      ▼
+             ┌─────────────────┐
+             │ Intent Extractor│
+             └────────┬────────┘
+                      │
+                      ▼
+             ┌─────────────────┐
+             │ Ambiguity Engine │
+             └────────┬────────┘
+                      │
+             ┌────────┴────────┐
+             │                 │
+          COMPLETE          AMBIGUOUS
+             │                 │
+             │                 ▼
+             │          Clarification
+             │                 │
+             │                 ▼
+             └──────────► Resolved Intent
+                                │
+                                ▼
+                       ┌────────────────┐
+                       │  Query Planner │
+                       └───────┬────────┘
+                               ▼
+                       ┌────────────────┐
+                       │  SQL Generator │
+                       └───────┬────────┘
+                               ▼
+                       ┌────────────────┐
+                       │ SQL Validator  │
+                       └───────┬────────┘
+                               ▼
+                           DATABASE
+                               │
+                               ▼
+                           RESULT
+                               │
+                               ▼
+                       Natural Language
