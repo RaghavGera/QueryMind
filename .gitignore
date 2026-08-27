@@ -33,6 +33,7 @@ wheels/
 *.swp
 *.swo
 *~
+.claude/
 
 # OS
 .DS_Store
@@ -51,3 +52,8 @@ htmlcov/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# Project specific
+output/
+temp/
+*.tmp

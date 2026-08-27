@@ -317,10 +317,10 @@ except Exception as e:
 ### Run Tests
 ```bash
 # Full Phase 3 test suite
-python test_phase3.py
+python testing/test_phase3.py
 
 # Real-world questions test
-python test_ambiguity_realworld.py
+python testing/test_ambiguity_realworld.py
 ```
 
 ### Expected Output
@@ -347,9 +347,9 @@ Results: 9/9 tests passed
 ## Files
 
 - `app/ambiguity_detector.py` - Main detector implementation
-- `test_phase3.py` - Unit tests (9 tests)
-- `test_ambiguity_realworld.py` - Real-world scenario tests (10 questions)
-- `PHASE3_REALWORLD_RESULTS.md` - Detailed test results
+- `testing/test_phase3.py` - Unit tests (9 tests)
+- `testing/test_ambiguity_realworld.py` - Real-world scenario tests (10 questions)
+- `docs/PHASE3_REALWORLD_RESULTS.md` - Detailed test results
 
 ## Status
 

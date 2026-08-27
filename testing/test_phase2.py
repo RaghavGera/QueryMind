@@ -7,7 +7,10 @@ This script tests the natural language understanding components of the Text-to-S
 
 import os
 import sys
+from pathlib import Path
 from typing import Dict, List
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 # Fix Windows console encoding issues
 if sys.platform == 'win32':

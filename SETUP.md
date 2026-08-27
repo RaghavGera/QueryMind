@@ -46,7 +46,7 @@ psql -U postgres -d text_to_sql -f database/text_to_sql_database.sql
 ### 4. Run Test Script
 
 ```bash
-python test_phase1.py
+python testing/test_phase1.py
 ```
 
 This will verify:
@@ -238,7 +238,8 @@ text-to-sql/
 ├── requirements.txt
 ├── README.md
 ├── SETUP.md             # This file
-└── test_phase1.py       # Test script
+└── testing/
+    └── test_phase1.py   # Test script
 ```
 
 ## Ready for Phase 2?
