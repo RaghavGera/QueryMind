@@ -1,0 +1,90 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-base-950 text-ink font-sans antialiased;
+  background-image: theme("backgroundImage.grid-fade");
+  background-size: theme("backgroundSize.grid");
+  background-position: center;
+}
+
+::selection {
+  background: rgba(139, 123, 255, 0.35);
+  color: white;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: theme("colors.base.600");
+  border-radius: 999px;
+  border: 2px solid theme("colors.base.950");
+}
+
+@layer components {
+  .glass {
+    @apply bg-base-900/60 backdrop-blur-xl border border-line;
+  }
+  .glass-strong {
+    @apply bg-base-850/80 backdrop-blur-2xl border border-line-strong;
+  }
+  .surface-card {
+    @apply glass rounded-2xl shadow-card;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-accent-violet to-accent-indigo
+      px-5 py-2.5 text-sm font-medium text-white shadow-glow-sm transition-all duration-200
+      hover:shadow-glow hover:-translate-y-0.5 active:translate-y-0;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl border border-line-strong bg-white/[0.03]
+      px-5 py-2.5 text-sm font-medium text-ink transition-all duration-200
+      hover:bg-white/[0.07] hover:border-line-strong hover:-translate-y-0.5 active:translate-y-0;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm text-ink-dim
+      transition-colors hover:text-ink hover:bg-white/[0.05];
+  }
+  .chip {
+    @apply rounded-full border border-line bg-white/[0.03] px-3 py-1 text-xs text-ink-dim;
+  }
+  .status-dot {
+    @apply inline-block h-2 w-2 rounded-full;
+  }
+  .mono {
+    @apply font-mono;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(180deg, #ffffff 0%, #b9b6cf 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .text-gradient-accent {
+    background: linear-gradient(90deg, #a78bfa 0%, #5eead4 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}

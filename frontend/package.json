@@ -1,0 +1,33 @@
+{
+  "name": "querymind-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "oxlint",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@react-three/drei": "^9.99.0",
+    "@react-three/fiber": "^8.15.19",
+    "framer-motion": "^13.4.0",
+    "lucide-react": "^1.47.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.18.4",
+    "recharts": "^3.10.1",
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "autoprefixer": "^10.6.1",
+    "oxlint": "^1.81.0",
+    "postcss": "^8.5.28",
+    "tailwindcss": "^3.4.13",
+    "vite": "^8.3.0"
+  }
+}
