@@ -5,11 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-09-20
+
+### Added - Phase 4: SQL Generation ✅
+
+#### Core Features
+
+- **SQLGenerator** class: converts a `StructuredIntent` into parameterized SQL
+- Runs the Phase 3 `AmbiguityDetector` as a gatekeeper before every generation:
+  - Auto-resolves ambiguities the detector has a `suggested_resolution` for
+  - Blocks generation outright on CRITICAL ambiguities (e.g. DELETE/UPDATE
+    without WHERE) rather than emitting a destructive query
+  - Returns clarification questions for unresolved HIGH/MEDIUM ambiguities
+    in strict mode (the default); `strict=False` proceeds with warnings instead
+- Hardcoded, independent safety net for unfiltered UPDATE/DELETE that holds
+  even if the ambiguity gate is bypassed, unless `allow_full_table_write=True`
+  is explicitly passed to `generate()`
+- Supports SELECT, INSERT, UPDATE, DELETE, COUNT, and AGGREGATE query types,
+  including JOINs, GROUP BY, HAVING, ORDER BY, DISTINCT, and LIMIT/OFFSET
+- All values passed as `%s` query parameters, never string-interpolated
+
+#### Models
+
+- `GenerationStatus` enum (`success`, `success_with_warnings`,
+  `needs_clarification`, `blocked`, `error`)
+- `SQLGenerationResult` model carrying the SQL, params, warnings, and any
+  clarification questions
+
+#### Testing
+
+- 14/14 tests passing in `testing/test_phase4.py`, covering clean generation,
+  joins/aggregations, unfiltered DELETE/UPDATE blocking, the bypass-flag
+  safety net, single- vs multi-way fuzzy table matches, a hard "table
+  doesn't exist" error, non-strict mode, and IN/BETWEEN operators
+- Test suite runs against an in-memory mock schema, no live database required
+
 ## [0.3.0] - 2026-08-27
 
 ### Added - Phase 3: Ambiguity Detection ✅
 
 #### Core Features
+
 - **AmbiguityDetector** class for comprehensive ambiguity detection
 - **10 Ambiguity Types** detection:
   - Missing required filters (DELETE/UPDATE without WHERE)
@@ -30,11 +66,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - LOW: Optional (nice to have)
 
 #### Models
+
 - `Ambiguity` model for representing individual ambiguities
 - `AmbiguityDetectionResult` model for detection results
 - `AmbiguityType` and `SeverityLevel` enums
 
 #### Functionality
+
 - Fuzzy matching for table name matching
 - Foreign key relationship analysis
 - Date column identification
@@ -43,23 +81,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `resolve_ambiguity()` function for applying user choices
 
 #### Testing
+
 - 9/9 comprehensive unit tests passing
 - Real-world question analysis (10 business questions)
 - Safety mechanism validation
 - Severity classification tests
 
 #### Documentation
+
 - Complete Phase 3 documentation
 - Real-world test results analysis
 - Architecture diagrams
 - Usage examples
 
 ### Changed
+
 - Updated README.md with comprehensive project information
 - Enhanced .gitignore with additional exclusions
 - Reorganized documentation into docs/ directory
 
 ### Fixed
+
 - Python cache cleanup in repository
 - Project structure organization
 
@@ -68,12 +110,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added - Phase 2: Natural Language Understanding ✅
 
 #### Core Components
+
 - **EntityRecognizer** class with fuzzy matching capabilities
 - **IntentExtractor** for extracting structured intents from NL
 - **OpenAI/Groq API Client** for LLM integration
 - **QueryIntent** model for intermediate intent representation
 
 #### Features
+
 - Entity recognition (tables, columns, values)
 - Intent classification (SELECT, COUNT, JOIN, etc.)
 - Fuzzy matching for entity names
@@ -81,12 +125,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Schema validation
 
 #### Testing
+
 - 5/5 unit tests passing
 - API client integration tests
 - Entity recognition validation
 - Full pipeline integration tests
 
 #### Documentation
+
 - Phase 2 setup guide
 - API configuration instructions
 
@@ -95,11 +141,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added - Phase 1: Database Schema Introspection ✅
 
 #### Core Components
+
 - **Database** class for MySQL connection management
 - **SchemaIntrospector** for schema analysis
 - **Schema** models for representing database structure
 
 #### Features
+
 - Automatic schema introspection
 - Table detection and analysis
 - Column type identification
@@ -108,18 +156,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Constraint analysis
 
 #### Models
+
 - `Table` model for table information
 - `Column` model for column metadata
 - `ForeignKey` model for relationships
 - `DatabaseSchema` model for complete schema
 
 #### Testing
+
 - 5/5 unit tests passing
 - Database connection validation
 - Schema analysis verification
 - Relationship detection tests
 
 #### Documentation
+
 - Comprehensive setup guide
 - Database configuration instructions
 - Example usage
@@ -129,12 +180,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned - Phase 4: SQL Generation 🚧
 
 #### Features
+
 - Convert structured intents to SQL queries
 - Support for multiple SQL dialects
 - Query optimization
 - Security validation
 
 #### Models
+
 - `SQLGenerationRequest`
 - `SQLQuery`
 - `QueryExecutionPlan`
@@ -142,6 +195,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned - Phase 5: Query Optimization
 
 #### Features
+
 - Query plan analysis
 - Index suggestions
 - Performance optimization
@@ -150,6 +204,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned - Phase 6: Result Interpretation
 
 #### Features
+
 - Result formatting
 - Data visualization suggestions
 - Natural language result summarization
@@ -158,6 +213,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned - Phase 7: Web Interface
 
 #### Features
+
 - React-based frontend
 - Real-time query building
 - Result visualization
@@ -166,24 +222,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Planned - Enhanced Features
 
 #### Multi-Database Support
+
 - PostgreSQL support
 - SQLite support
 - Oracle support
 - SQL Server support
 
 #### Advanced NLP
+
 - Better semantic understanding
 - Business term dictionary
 - Context-aware interpretation
 - Multi-language support
 
 #### ML/AI Enhancements
+
 - Learn from user feedback
 - Improve accuracy over time
 - Context-aware suggestions
 - Pattern recognition
 
 #### API & Integration
+
 - REST API endpoints
 - GraphQL support
 - Webhook support
@@ -191,15 +251,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Version History
 
-| Version | Date | Status | Focus |
-|---------|------|--------|-------|
-| 0.3.0 | 2026-08-27 | ✅ Complete | Ambiguity Detection |
-| 0.2.0 | 2026-08-24 | ✅ Complete | NL Understanding |
-| 0.1.0 | 2026-08-23 | ✅ Complete | Schema Introspection |
+| Version | Date       | Status      | Focus                |
+| ------- | ---------- | ----------- | -------------------- |
+| 0.3.0   | 2026-08-27 | ✅ Complete | Ambiguity Detection  |
+| 0.2.0   | 2026-08-24 | ✅ Complete | NL Understanding     |
+| 0.1.0   | 2026-08-23 | ✅ Complete | Schema Introspection |
 
 ## Statistics
 
 ### Code Metrics (as of 0.3.0)
+
 - **Total Lines of Code**: ~3,500
 - **Test Coverage**: 9/9 phases tests passing
 - **Ambiguity Types**: 10 detected
@@ -207,12 +268,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Components**: 7 main modules
 
 ### Performance
+
 - Schema introspection: ~100ms
 - Entity recognition: ~50ms per query
 - Intent extraction: ~200ms per query (with LLM)
 - Ambiguity detection: ~10-50ms per query
 
 ### Test Results
+
 - Phase 1: 5/5 tests (100%) ✅
 - Phase 2: 5/5 tests (100%) ✅
 - Phase 3: 9/9 tests (100%) ✅
@@ -225,11 +288,13 @@ None yet.
 ## Security
 
 ### Version 0.3.0
+
 - Added safety checks for dangerous queries
 - Implemented query validation
 - Added user confirmation for destructive operations
 
 ### Future Security
+
 - SQL injection prevention
 - Query sanitization
 - Access control validation
@@ -238,9 +303,11 @@ None yet.
 ## Migration Guide
 
 ### From 0.2.0 to 0.3.0
+
 No breaking changes. New features are backward compatible.
 
 ### From 0.1.0 to 0.2.0
+
 No breaking changes. Only new components added.
 
 ## Contributing
@@ -250,11 +317,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 ## Acknowledgments
 
 ### Libraries & Frameworks
+
 - Pydantic for data validation
 - MySQL for database support
 - Groq/OpenAI for LLM capabilities
 
 ### Contributors
+
 Thanks to all contributors who have helped with code, documentation, and testing!
 
 ## License

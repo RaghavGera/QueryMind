@@ -5,10 +5,11 @@ A comprehensive natural language to SQL query conversion system with ambiguity d
 ## 🎯 Project Overview
 
 This system converts natural language questions into SQL queries through a multi-phase pipeline that includes:
+
 - Database schema introspection
 - Natural language understanding
 - Ambiguity detection and clarification
-- SQL query generation (Phase 4 - Coming Soon)
+- SQL query generation (Phase 4)
 
 ## 🏗️ Architecture
 
@@ -40,7 +41,7 @@ This system converts natural language questions into SQL queries through a multi
 └─────────────────────┬───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
-│  Phase 4: SQL Generation (Coming Soon)                      │
+│  Phase 4: SQL Generation ✓                                   │
 │  • Convert structured intent to SQL                          │
 │  • Apply optimizations                                       │
 │  • Validate query syntax                                     │
@@ -89,18 +90,21 @@ text-to-sql/
 ## ✨ Features
 
 ### Phase 1: Database Schema Introspection ✅
+
 - Automatic schema analysis
 - Foreign key relationship detection
 - Data type identification
 - Primary key discovery
 
 ### Phase 2: Natural Language Understanding ✅
+
 - Entity recognition with fuzzy matching
 - Intent extraction using LLM
 - Structured intent creation
 - Confidence scoring
 
 ### Phase 3: Ambiguity Detection ✅
+
 - **10 Ambiguity Types Detected:**
   - Missing required filters (DELETE/UPDATE without WHERE)
   - Multiple table/column matches
@@ -117,8 +121,15 @@ text-to-sql/
   - 🟡 MEDIUM: Recommended (improves clarity)
   - 🟢 LOW: Optional (nice to have)
 
-### Phase 4: SQL Generation 🚧
-Coming soon...
+### Phase 4: SQL Generation ✅
+
+- Converts a (clarified) `StructuredIntent` into parameterized SQL via `SQLGenerator`
+- Runs Phase 3's `AmbiguityDetector` as a gatekeeper before generating anything
+- Auto-resolves ambiguities the detector is confident about (single fuzzy table match, etc.)
+- Blocks CRITICAL ambiguities outright (e.g. DELETE/UPDATE with no WHERE) -- no SQL is emitted
+- Asks for clarification on unresolved HIGH/MEDIUM ambiguities instead of guessing
+- Supports SELECT, INSERT, UPDATE, DELETE, COUNT, and aggregate queries with JOINs, GROUP BY, HAVING, ORDER BY, LIMIT/OFFSET
+- All values are passed as query parameters (`%s` placeholders), never string-interpolated
 
 ## 🚀 Quick Start
 
@@ -131,28 +142,33 @@ Coming soon...
 ### Installation
 
 1. **Clone the repository**
+
 ```bash
 git clone <repository-url>
 cd text-to-sql
 ```
 
 2. **Install dependencies**
+
 ```bash
 pip install -r requirements.txt
 ```
 
 3. **Set up database**
+
 ```bash
 psql -U postgres -d text_to_sql -f database/text_to_sql_database.sql
 ```
 
 4. **Configure environment**
+
 ```bash
 cp .env.example .env
 # Edit .env with your credentials
 ```
 
 5. **Run tests**
+
 ```bash
 # Test Phase 1
 python testing/test_phase1.py
@@ -170,7 +186,9 @@ python testing/test_ambiguity_realworld.py
 ## 📊 Test Results
 
 ### Phase 1 Tests
+
 ✅ 5/5 tests passing
+
 - Database connection
 - Schema introspection
 - Table detection
@@ -178,7 +196,9 @@ python testing/test_ambiguity_realworld.py
 - Foreign key relationships
 
 ### Phase 2 Tests
+
 ✅ 5/5 tests passing
+
 - OpenAI client initialization
 - Entity recognition
 - Intent extraction
@@ -186,7 +206,9 @@ python testing/test_ambiguity_realworld.py
 - Pydantic models
 
 ### Phase 3 Tests
+
 ✅ 9/9 tests passing
+
 - Ambiguity detector initialization
 - Missing filter detection
 - Column ambiguity detection
@@ -198,7 +220,9 @@ python testing/test_ambiguity_realworld.py
 - Severity level classification
 
 ### Real-World Question Tests
+
 ✅ 10/10 questions analyzed successfully
+
 - 40% detected ambiguities requiring clarification
 - 100% accuracy on safety checks
 - 0 false negatives on dangerous queries
@@ -223,6 +247,7 @@ GROQ_MODEL=llama-3.1-70b-versatile
 ### API Keys
 
 Get a free Groq API key:
+
 1. Visit https://console.groq.com/keys
 2. Sign up for an account
 3. Generate an API key
@@ -231,6 +256,7 @@ Get a free Groq API key:
 ## 📖 Usage Examples
 
 ### Example 1: Basic Query
+
 ```python
 from app.database import init_db
 from app.schema import SchemaIntrospector
@@ -262,6 +288,7 @@ else:
 ```
 
 ### Example 2: Dangerous Query Detection
+
 ```python
 # Dangerous DELETE without WHERE
 intent = StructuredIntent(
@@ -277,6 +304,7 @@ result = detector.detect_ambiguities(intent)
 ## 🧪 Testing
 
 ### Run All Tests
+
 ```bash
 # Run all phase tests sequentially
 python testing/test_phase1.py && \
@@ -285,6 +313,7 @@ python testing/test_phase3.py
 ```
 
 ### Run Specific Tests
+
 ```bash
 # Phase 1 only
 python testing/test_phase1.py
@@ -304,13 +333,14 @@ python testing/test_ambiguity_realworld.py
 - [Setup Guide](SETUP.md) - Detailed setup instructions
 - [Phase 3 Documentation](docs/PHASE3_README.md) - Ambiguity detection details
 - [Phase 3 Test Results](docs/PHASE3_REALWORLD_RESULTS.md) - Real-world test analysis
+- [Phase 4 Documentation](docs/PHASE4_README.md) - SQL generation, safety model, and the `/query` endpoint
 
 ## 🛣️ Roadmap
 
 - [x] Phase 1: Database Schema Introspection
 - [x] Phase 2: Natural Language Understanding
 - [x] Phase 3: Ambiguity Detection & Clarification
-- [ ] Phase 4: SQL Query Generation
+- [x] Phase 4: SQL Query Generation
 - [ ] Phase 5: Query Optimization
 - [ ] Phase 6: Result Interpretation
 - [ ] Web UI Interface
@@ -337,6 +367,6 @@ Raghav
 
 ---
 
-**Status**: Phase 3 Complete ✅ | Phase 4 In Progress 🚧
+**Status**: Phase 4 Complete ✅ | Phase 5 Not Started
 
 Last Updated: 2026-08-27
