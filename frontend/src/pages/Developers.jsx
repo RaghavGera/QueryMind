@@ -22,7 +22,7 @@ export default function Developers() {
   return (
     <div className="min-h-screen">
       <Navbar />
-      <section className="mx-auto max-w-4xl px-6 pb-10 pt-36">
+      <section className="mx-auto max-w-4xl px-4 sm:px-6 pb-10 pt-36">
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-accent-glow">Developers</p>
         <h1 className="font-display text-4xl font-semibold text-ink">Query your database from code</h1>
         <p className="mt-3 max-w-xl text-ink-dim">
@@ -30,11 +30,11 @@ export default function Developers() {
         </p>
       </section>
 
-      <section className="mx-auto max-w-3xl px-6 pb-16">
+      <section className="mx-auto max-w-3xl px-4 sm:px-6 pb-16">
         <SqlPanel sql={codeSample} dialect="JavaScript" />
       </section>
 
-      <section className="mx-auto grid max-w-4xl gap-4 px-6 pb-28 sm:grid-cols-2">
+      <section className="mx-auto grid max-w-4xl gap-4 px-4 sm:px-6 pb-28 sm:grid-cols-2">
         {items.map(({ icon: Icon, title, detail }) => (
           <Card key={title} className="p-5">
             <Icon size={18} className="mb-3 text-accent-glow" />

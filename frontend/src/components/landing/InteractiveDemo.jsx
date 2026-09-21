@@ -14,7 +14,7 @@ export default function InteractiveDemo() {
   } = pipeline;
 
   return (
-    <section className="mx-auto max-w-3xl px-6 py-24">
+    <section className="mx-auto max-w-3xl px-4 sm:px-6 py-24">
       <div className="mb-8 text-center">
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-accent-glow">Live demo</p>
         <h2 className="font-display text-3xl font-semibold text-ink">See it think</h2>

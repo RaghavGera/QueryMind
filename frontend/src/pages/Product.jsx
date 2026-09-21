@@ -14,11 +14,11 @@ export default function Product() {
   return (
     <div className="min-h-screen">
       <Navbar />
-      <section className="mx-auto max-w-4xl px-6 pb-16 pt-36 text-center">
+      <section className="mx-auto max-w-4xl px-4 sm:px-6 pb-16 pt-36 text-center">
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-accent-glow">Product</p>
         <h1 className="font-display text-4xl font-semibold text-ink">A database interface that thinks before it queries</h1>
       </section>
-      <section className="mx-auto grid max-w-5xl gap-4 px-6 pb-28 sm:grid-cols-2">
+      <section className="mx-auto grid max-w-5xl gap-4 px-4 sm:px-6 pb-28 sm:grid-cols-2">
         {features.map(({ icon: Icon, title, detail }) => (
           <Card key={title} className="p-6">
             <Icon size={20} className="mb-3 text-accent-glow" />

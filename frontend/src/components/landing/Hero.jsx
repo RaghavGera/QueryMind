@@ -10,7 +10,7 @@ export default function Hero() {
       <div className="absolute inset-0 bg-radial-glow" />
       <HeroCanvas className="pointer-events-none absolute inset-0 opacity-90 md:opacity-100" />
 
-      <div className="relative mx-auto max-w-4xl px-6 text-center">
+      <div className="relative mx-auto max-w-4xl px-4 sm:px-6 text-center">
         <motion.div
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}

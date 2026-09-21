@@ -19,7 +19,10 @@ export default function ResultsView({ result, executionMs, dialect = "PostgreSQL
 
   const { columns, rows } = result;
   const numericCols = columns.filter((c) => typeof rows[0][c] === "number");
-  const canChart = numericCols.length > 0 && columns.length <= 4;
+  const nonNumericCols = columns.filter((c) => typeof rows[0][c] !== "number");
+  const canChart = numericCols.length > 0 && nonNumericCols.length > 0 && columns.length <= 5;
+  const xCandidate = nonNumericCols[0] ?? columns[0];
+  const chartKind = /month|date|day|week|year|time/i.test(xCandidate) ? "line" : "bar";
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
@@ -48,7 +51,7 @@ export default function ResultsView({ result, executionMs, dialect = "PostgreSQL
       {view === "table" || !canChart ? (
         <ResultsTable columns={columns} rows={rows} />
       ) : (
-        <ResultsChart columns={columns} rows={rows} kind={rows.length > 8 ? "line" : "bar"} />
+        <ResultsChart columns={columns} rows={rows} kind={chartKind} />
       )}
     </motion.div>
   );

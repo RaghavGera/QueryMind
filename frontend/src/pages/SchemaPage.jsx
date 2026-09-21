@@ -21,7 +21,7 @@ export default function SchemaPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6 px-6 py-10">
+    <div className="mx-auto max-w-5xl space-y-6 px-4 sm:px-6 py-10">
       <div>
         <h1 className="font-display text-2xl font-semibold text-ink">Database schema</h1>
         <p className="mt-1 text-sm text-ink-dim">{schema.tables.length} tables · sample_ecommerce_db</p>

@@ -21,7 +21,7 @@ export default function HistoryPage() {
   const handleDuplicate = () => navigate("/app");
 
   return (
-    <div className="mx-auto max-w-3xl space-y-4 px-6 py-10">
+    <div className="mx-auto max-w-3xl space-y-4 px-4 sm:px-6 py-10">
       <div>
         <h1 className="font-display text-2xl font-semibold text-ink">Query history</h1>
         <p className="mt-1 text-sm text-ink-dim">Every question you've asked, and how it resolved.</p>

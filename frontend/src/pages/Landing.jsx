@@ -14,7 +14,7 @@ export default function Landing() {
       <Hero />
       <InteractiveDemo />
 
-      <section className="mx-auto max-w-4xl px-6 py-24">
+      <section className="mx-auto max-w-4xl px-4 sm:px-6 py-24">
         <div className="mb-10 text-center">
           <p className="mb-2 text-xs font-medium uppercase tracking-wide text-accent-glow">How it works</p>
           <h2 className="font-display text-3xl font-semibold text-ink">Every query passes the same pipeline</h2>

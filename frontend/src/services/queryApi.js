@@ -14,9 +14,12 @@ function looksAmbiguous(question) {
 }
 
 function pickResultSet(question) {
-  if (/product/i.test(question)) return "products";
-  if (/region|country/i.test(question)) return "country";
-  if (/revenue|month/i.test(question)) return "revenue";
+  if (/sign[\s-]?up|new customers?/i.test(question)) return "signups";
+  if (/\bproducts?\b/i.test(question)) return "products";
+  if (/\bregion(s)?\b|\bcountr(y|ies)\b/i.test(question)) return "region";
+  if (/\brevenue\b|\bsales\b/i.test(question)) return "revenue";
+  if (/\border(s|ed)?\b/i.test(question)) return "orders";
+  if (/\baverage\b|\baov\b/i.test(question)) return "aov";
   return "spending";
 }
 

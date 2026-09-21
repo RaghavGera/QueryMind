@@ -5,7 +5,7 @@ const icons = [ShieldCheck, DatabaseZap, Ban, ScrollText, Lock, KeyRound];
 
 export default function TrustSection() {
   return (
-    <section className="mx-auto max-w-6xl px-6 py-24">
+    <section className="mx-auto max-w-6xl px-4 sm:px-6 py-24">
       <div className="mb-10 text-center">
         <p className="mb-2 text-xs font-medium uppercase tracking-wide text-accent-glow">Trust</p>
         <h2 className="font-display text-3xl font-semibold text-ink">Built to touch a real database safely</h2>

@@ -134,11 +134,94 @@ JOIN (
 GROUP BY c.customer_id, name
 ORDER BY avg_order_value DESC
 LIMIT 10;`,
+  products: `SELECT
+    p.product_id,
+    p.product_name,
+    p.category,
+    SUM(oi.quantity * oi.unit_price) AS revenue
+FROM products p
+JOIN order_items oi
+    ON oi.product_id = p.product_id
+GROUP BY p.product_id, p.product_name, p.category
+ORDER BY revenue DESC
+LIMIT 10;`,
+  region: `SELECT
+    c.country,
+    SUM(oi.quantity * oi.unit_price) AS revenue
+FROM customers c
+JOIN orders o
+    ON o.customer_id = c.customer_id
+JOIN order_items oi
+    ON oi.order_id = o.order_id
+GROUP BY c.country
+ORDER BY revenue DESC;`,
+  revenue: `SELECT
+    date_trunc('month', o.order_date) AS month,
+    SUM(oi.quantity * oi.unit_price) AS revenue
+FROM orders o
+JOIN order_items oi
+    ON oi.order_id = o.order_id
+WHERE o.order_date >= now() - interval '6 months'
+GROUP BY month
+ORDER BY month;`,
+  signups: `SELECT
+    date_trunc('week', signup_date) AS week,
+    COUNT(*) AS new_customers
+FROM customers
+WHERE signup_date >= date_trunc('month', now()) - interval '1 month'
+  AND signup_date < date_trunc('month', now())
+GROUP BY week
+ORDER BY week;`,
 };
 
 const names = [
   "Ava Whitfield", "Marcus Chen", "Priya Nair", "Elena Petrova", "Noah Kim",
   "Isabelle Laurent", "Diego Alvarez", "Grace Osei", "Yuki Tanaka", "Liam O'Connor",
+];
+
+const productNames = [
+  { name: "Aurora Wireless Headphones", category: "Electronics" },
+  { name: "Nimbus Standing Desk", category: "Furniture" },
+  { name: "Solace Weighted Blanket", category: "Home" },
+  { name: "Pulse Fitness Tracker", category: "Electronics" },
+  { name: "Drift Ceramic Mug Set", category: "Kitchen" },
+  { name: "Echo Bluetooth Speaker", category: "Electronics" },
+  { name: "Haven Memory Foam Pillow", category: "Home" },
+  { name: "Cascade Water Bottle", category: "Outdoor" },
+  { name: "Lumen Desk Lamp", category: "Furniture" },
+  { name: "Orbit Phone Stand", category: "Electronics" },
+];
+
+export const revenueByMonth = [
+  { month: "Apr", revenue: 82000 },
+  { month: "May", revenue: 91500 },
+  { month: "Jun", revenue: 87200 },
+  { month: "Jul", revenue: 104800 },
+  { month: "Aug", revenue: 118300 },
+  { month: "Sep", revenue: 126900 },
+];
+
+export const customersByCountry = [
+  { country: "USA", customers: 1820 },
+  { country: "India", customers: 1140 },
+  { country: "UK", customers: 640 },
+  { country: "Germany", customers: 480 },
+  { country: "Canada", customers: 390 },
+];
+
+const revenueByRegion = [
+  { country: "USA", revenue: 412500 },
+  { country: "UK", revenue: 198200 },
+  { country: "India", revenue: 176900 },
+  { country: "Germany", revenue: 134700 },
+  { country: "Canada", revenue: 98300 },
+];
+
+const signupsByWeek = [
+  { week: "Week 1", new_customers: 84 },
+  { week: "Week 2", new_customers: 112 },
+  { week: "Week 3", new_customers: 97 },
+  { week: "Week 4", new_customers: 131 },
 ];
 
 export const demoResults = {
@@ -157,24 +240,16 @@ export const demoResults = {
     name,
     avg_order_value: Math.round((610 - i * 34 + Math.random() * 10) * 100) / 100,
   })),
+  products: productNames.map((p, i) => ({
+    product_id: 2000 + i,
+    product_name: p.name,
+    category: p.category,
+    revenue: Math.round(48000 - i * 3600 + Math.random() * 800),
+  })),
+  region: revenueByRegion,
+  revenue: revenueByMonth,
+  signups: signupsByWeek,
 };
-
-export const revenueByMonth = [
-  { month: "Apr", revenue: 82000 },
-  { month: "May", revenue: 91500 },
-  { month: "Jun", revenue: 87200 },
-  { month: "Jul", revenue: 104800 },
-  { month: "Aug", revenue: 118300 },
-  { month: "Sep", revenue: 126900 },
-];
-
-export const customersByCountry = [
-  { country: "USA", customers: 1820 },
-  { country: "India", customers: 1140 },
-  { country: "UK", customers: 640 },
-  { country: "Germany", customers: 480 },
-  { country: "Canada", customers: 390 },
-];
 
 export const queryHistory = [
   {

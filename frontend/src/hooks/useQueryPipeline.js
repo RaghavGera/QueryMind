@@ -7,13 +7,20 @@ import {
 
 const STAGE_MS = 480;
 
-function animateStages(count, onTick, signalRef) {
+function animateStages(count, onTick, runTokenRef, token) {
   return new Promise((resolve) => {
     let i = 0;
     onTick(0);
     const id = setInterval(() => {
+      if (runTokenRef.token !== token) {
+        // A newer ask()/selectClarification() call has started since this
+        // animation began — stop ticking and resolve so Promise.all doesn't
+        // hang forever on a superseded run.
+        clearInterval(id);
+        resolve();
+        return;
+      }
       i += 1;
-      if (signalRef.current !== signalRef.token) return; // superseded run
       onTick(i);
       if (i >= count) {
         clearInterval(id);
@@ -66,7 +73,7 @@ export function useQueryPipeline({ onComplete } = {}) {
 
     try {
       const [, response] = await Promise.all([
-        animateStages(pipelineStagesInitial.length, setProcessingStage, runToken.current),
+        animateStages(pipelineStagesInitial.length, setProcessingStage, runToken.current, token),
         submitQuestion(q),
       ]);
       if (runToken.current.token !== token) return;
@@ -80,7 +87,7 @@ export function useQueryPipeline({ onComplete } = {}) {
       setStatus("generating");
       setGeneratingStage(0);
       const [, genResult] = await Promise.all([
-        animateStages(pipelineStagesAfterClarification.length, setGeneratingStage, runToken.current),
+        animateStages(pipelineStagesAfterClarification.length, setGeneratingStage, runToken.current, token),
         runGeneration(response.resultKey),
       ]);
       if (runToken.current.token !== token) return;
@@ -105,7 +112,7 @@ export function useQueryPipeline({ onComplete } = {}) {
 
     try {
       const [, genResult] = await Promise.all([
-        animateStages(pipelineStagesAfterClarification.length, setGeneratingStage, runToken.current),
+        animateStages(pipelineStagesAfterClarification.length, setGeneratingStage, runToken.current, token),
         resolveClarification(choiceId),
       ]);
       if (runToken.current.token !== token) return;

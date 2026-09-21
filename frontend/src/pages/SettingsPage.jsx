@@ -3,7 +3,7 @@ import { StatusDot } from "../components/ui/Surfaces";
 
 export default function SettingsPage() {
   return (
-    <div className="mx-auto max-w-2xl space-y-5 px-6 py-10">
+    <div className="mx-auto max-w-2xl space-y-5 px-4 sm:px-6 py-10">
       <h1 className="font-display text-2xl font-semibold text-ink">Settings</h1>
 
       <Card className="p-5">
