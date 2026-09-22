@@ -31,6 +31,7 @@ Typical usage
 """
 
 from enum import Enum
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field
@@ -205,9 +206,19 @@ class SQLGenerator:
         for amb in unresolved:
             warnings.append(f"Unresolved ({amb.severity.value}, proceeding anyway): {amb.description}")
 
+        try:
+            self._validate_identifiers(working_intent, ambiguity_result)
+        except SQLGenerationError as exc:
+            return SQLGenerationResult(
+                status=GenerationStatus.ERROR,
+                error_message=str(exc),
+                ambiguity_result=ambiguity_result,
+            )
+
         # 4. Build the actual SQL.
         try:
-            sql, params = self._build_sql(working_intent, allow_full_table_write=allow_full_table_write)
+            sql, params = self._build_sql(
+                working_intent,allow_full_table_write=allow_full_table_write)
         except SQLGenerationError as exc:
             return SQLGenerationResult(
                 status=GenerationStatus.ERROR,
@@ -246,6 +257,67 @@ class SQLGenerator:
                 raise SQLGenerationError(
                     f"Table '{table}' does not exist in the schema and no similar table was found."
                 )
+
+    def _validate_identifiers(
+        self,
+        intent: StructuredIntent,
+        ambiguity_result: Optional[AmbiguityDetectionResult] = None,
+    ) -> None:
+        schema_tables = set(self.schema.tables)
+        referenced_tables = set(intent.tables)
+        unresolved_tables = {
+            ambiguity.context.get("original_table")
+            for ambiguity in (ambiguity_result.ambiguities if ambiguity_result else [])
+            if ambiguity.ambiguity_type == AmbiguityType.MULTIPLE_TABLE_MATCHES
+        }
+        for join in intent.joins:
+            referenced_tables.update((join.left_table, join.right_table))
+
+        for table in referenced_tables:
+            if table not in schema_tables and table not in unresolved_tables:
+                raise SQLGenerationError(f"Table '{table}' does not exist in the schema.")
+
+        def validate_reference(reference: str, context: str, allow_aggregate: bool = False) -> None:
+            if allow_aggregate and self._parse_aggregate_expression(reference):
+                return
+            if "(" in reference or ")" in reference:
+                raise SQLGenerationError(f"Invalid {context} expression '{reference}'.")
+            if "." in reference:
+                table, column = reference.split(".", 1)
+                if table not in schema_tables and table not in unresolved_tables:
+                    raise SQLGenerationError(f"Table '{table}' in {context} does not exist in the schema.")
+                if table in unresolved_tables:
+                    return
+                if column not in self.schema.tables[table].columns:
+                    raise SQLGenerationError(f"Column '{reference}' in {context} does not exist in the schema.")
+            else:
+                if not any(
+                    table in self.schema.tables and reference in self.schema.tables[table].columns
+                    for table in referenced_tables
+                ) and not (referenced_tables & unresolved_tables) \
+                        and reference not in {condition.column for condition in intent.having_conditions}:
+                    raise SQLGenerationError(f"Column '{reference}' in {context} does not exist in the schema.")
+
+        for column in intent.columns:
+            validate_reference(column, "SELECT")
+        for column in intent.group_by:
+            validate_reference(column, "GROUP BY")
+        for aggregation in intent.aggregations:
+            if aggregation.column:
+                validate_reference(aggregation.column, "aggregation")
+        for order in intent.order_by:
+            validate_reference(order.column, "ORDER BY", allow_aggregate=True)
+        for condition in intent.conditions + intent.having_conditions:
+            validate_reference(
+                f"{condition.table}.{condition.column}" if condition.table else condition.column,
+                "condition",
+            )
+
+        for join in intent.joins:
+            if join.left_column not in self.schema.tables[join.left_table].columns:
+                raise SQLGenerationError(f"Column '{join.left_table}.{join.left_column}' in JOIN does not exist in the schema.")
+            if join.right_column not in self.schema.tables[join.right_table].columns:
+                raise SQLGenerationError(f"Column '{join.right_table}.{join.right_column}' in JOIN does not exist in the schema.")
 
     # ------------------------------------------------------------------ #
     # SQL construction
@@ -301,7 +373,7 @@ class SQLGenerator:
             params.extend(having_params)
 
         if intent.order_by:
-            order_parts = [f"{self._qualify(o.column)} {o.direction.value}" for o in intent.order_by]
+            order_parts = [f"{self._render_order_expression(o.column)} {o.direction.value}" for o in intent.order_by]
             sql += f"\nORDER BY {', '.join(order_parts)}"
 
         if intent.limit is not None:
@@ -401,6 +473,23 @@ class SQLGenerator:
             expr = f"{agg.aggregation_type.value}({distinct}{col})"
         return f"{expr} AS {self._quote_ident(agg.alias)}" if agg.alias else expr
 
+    def _parse_aggregate_expression(self, value: str) -> Optional[str]:
+        match = re.match(
+            r"^(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\s*\(\s*(.*?)\s*\)$",
+            value.strip(),
+            re.IGNORECASE,
+        )
+        if not match:
+            return None
+        function_name, column = match.groups()
+        if column == "*":
+            return f"{function_name.upper()}(*)"
+        return f"{function_name.upper()}({self._qualify(column)})"
+
+    def _render_order_expression(self, value: str) -> str:
+        expression = self._parse_aggregate_expression(value)
+        return expression if expression else self._qualify(value)
+
     def _build_condition_clause(self, conditions: List[Condition]) -> Tuple[str, List[Any]]:
         fragments: List[str] = []
         params: List[Any] = []
@@ -442,6 +531,10 @@ class SQLGenerator:
 
     def _qualify(self, name: str) -> str:
         """Quote a possibly-qualified identifier like 'table.column'."""
+        if self._parse_aggregate_expression(name):
+            raise SQLGenerationError(
+                f"Aggregation expression '{name}' must be represented in aggregations or ORDER BY, not as a column."
+            )
         if "." in name:
             table, col = name.split(".", 1)
             return f'{self._quote_ident(table)}.{self._quote_ident(col)}'

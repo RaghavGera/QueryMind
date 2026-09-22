@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { submitQuestion, resolveClarification, runGeneration } from "../services/queryApi";
+import { submitQuestion } from "../services/queryApi";
 import {
   pipelineStagesInitial,
   pipelineStagesAfterClarification,
@@ -10,18 +10,19 @@ const STAGE_MS = 480;
 function animateStages(count, onTick, runTokenRef, token) {
   return new Promise((resolve) => {
     let i = 0;
+
     onTick(0);
+
     const id = setInterval(() => {
       if (runTokenRef.token !== token) {
-        // A newer ask()/selectClarification() call has started since this
-        // animation began — stop ticking and resolve so Promise.all doesn't
-        // hang forever on a superseded run.
         clearInterval(id);
         resolve();
         return;
       }
+
       i += 1;
       onTick(i);
+
       if (i >= count) {
         clearInterval(id);
         resolve();
@@ -31,7 +32,7 @@ function animateStages(count, onTick, runTokenRef, token) {
 }
 
 export function useQueryPipeline({ onComplete } = {}) {
-  const [status, setStatus] = useState("idle"); // idle | processing | clarifying | generating | done | error
+  const [status, setStatus] = useState("idle");
   const [question, setQuestion] = useState("");
   const [processingStage, setProcessingStage] = useState(0);
   const [generatingStage, setGeneratingStage] = useState(0);
@@ -46,6 +47,7 @@ export function useQueryPipeline({ onComplete } = {}) {
 
   const reset = useCallback(() => {
     runToken.current.token += 1;
+
     setStatus("idle");
     setQuestion("");
     setProcessingStage(0);
@@ -58,82 +60,257 @@ export function useQueryPipeline({ onComplete } = {}) {
     setError(null);
   }, []);
 
-  const ask = useCallback(async (q) => {
-    runToken.current.token += 1;
-    const token = runToken.current.token;
+  const ask = useCallback(
+    async (q) => {
+      const cleanQuestion = String(q || "").trim();
 
-    setQuestion(q);
-    setStatus("processing");
-    setClarification(null);
-    setSelectedChoice(null);
-    setSql(null);
-    setResult(null);
-    setError(null);
-    setProcessingStage(0);
+      if (!cleanQuestion) return;
 
-    try {
-      const [, response] = await Promise.all([
-        animateStages(pipelineStagesInitial.length, setProcessingStage, runToken.current, token),
-        submitQuestion(q),
-      ]);
-      if (runToken.current.token !== token) return;
+      runToken.current.token += 1;
+      const token = runToken.current.token;
 
-      if (response.status === "needs_clarification") {
-        setClarification(response.clarification);
-        setStatus("clarifying");
-        return;
+      setQuestion(cleanQuestion);
+      setStatus("processing");
+      setClarification(null);
+      setSelectedChoice(null);
+      setSql(null);
+      setResult(null);
+      setExecutionMs(null);
+      setError(null);
+      setProcessingStage(0);
+      setGeneratingStage(0);
+
+      try {
+        /*
+         * IMPORTANT:
+         *
+         * submitQuestion() now calls the REAL FastAPI /query endpoint.
+         *
+         * The backend is responsible for:
+         *   intent extraction
+         *   ambiguity detection
+         *   SQL generation
+         *   SQL validation
+         *   database execution
+         *   result generation
+         */
+
+        const [, response] = await Promise.all([
+          animateStages(
+            pipelineStagesInitial.length,
+            setProcessingStage,
+            runToken.current,
+            token,
+          ),
+
+          submitQuestion(cleanQuestion),
+        ]);
+
+        if (runToken.current.token !== token) return;
+
+        /*
+         * Backend needs clarification.
+         */
+        if (
+          response?.status === "needs_clarification" ||
+          response?.status === "blocked"
+        ) {
+          const questions = response?.clarification_questions || [];
+
+          setClarification({
+            question:
+              questions[0] ||
+              response?.clarification?.question ||
+              "Please clarify your request.",
+
+            questions,
+
+            /*
+             * Keep this for compatibility with the existing UI.
+             * There are no fake options anymore.
+             */
+            options: response?.clarification?.options || [],
+          });
+
+          setStatus("clarifying");
+          return;
+        }
+
+        /*
+         * Backend failed to generate/validate the query.
+         */
+        if (
+          response?.status !== "success" &&
+          response?.status !== "success_with_warnings"
+        ) {
+          throw new Error(
+            response?.error_message ||
+              response?.error ||
+              "The backend could not generate a valid SQL query.",
+          );
+        }
+
+        /*
+         * The backend already generated AND executed the SQL.
+         *
+         * There is NO runGeneration() call anymore.
+         */
+        setStatus("generating");
+        setGeneratingStage(0);
+
+        await animateStages(
+          pipelineStagesAfterClarification.length,
+          setGeneratingStage,
+          runToken.current,
+          token,
+        );
+
+        if (runToken.current.token !== token) return;
+
+        setSql(response.sql || null);
+
+        setResult(
+          response.result || {
+            columns: [],
+            rows: [],
+          },
+        );
+
+        setExecutionMs(response.execution_ms ?? null);
+
+        setStatus("done");
+
+        onComplete?.({
+          question: cleanQuestion,
+          resolved: null,
+          status: "success",
+          durationMs: response.execution_ms ?? null,
+        });
+      } catch (e) {
+        if (runToken.current.token !== token) return;
+
+        setError(
+          e?.message || "Could not communicate with the QueryMind backend.",
+        );
+
+        setStatus("error");
       }
+    },
+    [onComplete],
+  );
 
+  const selectClarification = useCallback(
+    async (answer) => {
+      const cleanAnswer = String(answer || "").trim();
+
+      if (!cleanAnswer) return;
+
+      runToken.current.token += 1;
+      const token = runToken.current.token;
+
+      setSelectedChoice(cleanAnswer);
       setStatus("generating");
       setGeneratingStage(0);
-      const [, genResult] = await Promise.all([
-        animateStages(pipelineStagesAfterClarification.length, setGeneratingStage, runToken.current, token),
-        runGeneration(response.resultKey),
-      ]);
-      if (runToken.current.token !== token) return;
+      setError(null);
 
-      setSql(genResult.sql);
-      setResult(genResult.result);
-      setExecutionMs(genResult.executionMs);
-      setStatus("done");
-      onComplete?.({ question: q, resolved: null, status: "success", durationMs: genResult.executionMs });
-    } catch (e) {
-      if (runToken.current.token !== token) return;
-      setError(e?.message ?? "Something went wrong generating this query.");
-      setStatus("error");
-    }
-  }, [onComplete]);
+      try {
+        /*
+         * Send the ORIGINAL question plus the user's clarification
+         * back through the SAME backend endpoint.
+         *
+         * No resolveClarification()
+         * No resultKey
+         * No mock lookup
+         */
 
-  const selectClarification = useCallback(async (choiceId) => {
-    const token = runToken.current.token;
-    setSelectedChoice(choiceId);
-    setStatus("generating");
-    setGeneratingStage(0);
+        const [, response] = await Promise.all([
+          animateStages(
+            pipelineStagesAfterClarification.length,
+            setGeneratingStage,
+            runToken.current,
+            token,
+          ),
 
-    try {
-      const [, genResult] = await Promise.all([
-        animateStages(pipelineStagesAfterClarification.length, setGeneratingStage, runToken.current, token),
-        resolveClarification(choiceId),
-      ]);
-      if (runToken.current.token !== token) return;
+          submitQuestion(question, cleanAnswer),
+        ]);
 
-      setSql(genResult.sql);
-      setResult(genResult.result);
-      setExecutionMs(genResult.executionMs);
-      setStatus("done");
+        if (runToken.current.token !== token) return;
 
-      const optionLabel = clarification?.options.find((o) => o.id === choiceId)?.label ?? choiceId;
-      onComplete?.({ question, resolved: optionLabel, status: "success", durationMs: genResult.executionMs });
-    } catch (e) {
-      if (runToken.current.token !== token) return;
-      setError(e?.message ?? "Something went wrong generating this query.");
-      setStatus("error");
-    }
-  }, [clarification, question, onComplete]);
+        if (
+          response?.status === "needs_clarification" ||
+          response?.status === "blocked"
+        ) {
+          const questions = response?.clarification_questions || [];
+
+          setClarification({
+            question: questions[0] || "Please provide more information.",
+
+            questions,
+
+            options: response?.clarification?.options || [],
+          });
+
+          setStatus("clarifying");
+          return;
+        }
+
+        if (
+          response?.status !== "success" &&
+          response?.status !== "success_with_warnings"
+        ) {
+          throw new Error(
+            response?.error_message ||
+              response?.error ||
+              "The backend could not generate a valid SQL query.",
+          );
+        }
+
+        setSql(response.sql || null);
+
+        setResult(
+          response.result || {
+            columns: [],
+            rows: [],
+          },
+        );
+
+        setExecutionMs(response.execution_ms ?? null);
+
+        setStatus("done");
+
+        onComplete?.({
+          question,
+          resolved: cleanAnswer,
+          status: "success",
+          durationMs: response.execution_ms ?? null,
+        });
+      } catch (e) {
+        if (runToken.current.token !== token) return;
+
+        setError(
+          e?.message || "Could not communicate with the QueryMind backend.",
+        );
+
+        setStatus("error");
+      }
+    },
+    [question, onComplete],
+  );
 
   return {
-    status, question, processingStage, generatingStage,
-    clarification, selectedChoice, sql, result, executionMs, error,
-    ask, selectClarification, reset,
+    status,
+    question,
+    processingStage,
+    generatingStage,
+    clarification,
+    selectedChoice,
+    sql,
+    result,
+    executionMs,
+    error,
+
+    ask,
+    selectClarification,
+    reset,
   };
 }

@@ -401,15 +401,14 @@ class StructuredIntent(BaseModel):
 
         # Validate joins reference valid tables
         if self.joins:
-            all_tables = set(self.tables)
+            all_tables = list(self.tables)
             for join in self.joins:
                 if join.left_table not in all_tables:
-                    all_tables.add(join.left_table)
+                    all_tables.append(join.left_table)
                 if join.right_table not in all_tables:
-                    all_tables.add(join.right_table)
+                    all_tables.append(join.right_table)
 
-            # Update tables list with joined tables
-            self.tables = list(all_tables)
+            self.tables = all_tables
 
         # Validate offset requires limit (common SQL pattern)
         if self.offset is not None and self.limit is None:

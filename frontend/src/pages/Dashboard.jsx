@@ -26,8 +26,19 @@ export default function Dashboard() {
   });
 
   const {
-    status, question, processingStage, generatingStage, clarification,
-    selectedChoice, sql, result, executionMs, error, ask, selectClarification, reset,
+    status,
+    question,
+    processingStage,
+    generatingStage,
+    clarification,
+    selectedChoice,
+    sql,
+    result,
+    executionMs,
+    error,
+    ask,
+    selectClarification,
+    reset,
   } = pipeline;
 
   const idle = status === "idle";
@@ -41,8 +52,13 @@ export default function Dashboard() {
           className="flex min-h-[60vh] flex-col items-center justify-center gap-6 text-center"
         >
           <div>
-            <h1 className="font-display text-2xl font-semibold text-ink sm:text-3xl">Ask anything about your data</h1>
-            <p className="mt-2 text-ink-dim">QueryMind will clarify anything genuinely ambiguous before it runs.</p>
+            <h1 className="font-display text-2xl font-semibold text-ink sm:text-3xl">
+              Ask anything about your data
+            </h1>
+            <p className="mt-2 text-ink-dim">
+              QueryMind will clarify anything genuinely ambiguous before it
+              runs.
+            </p>
           </div>
           <div className="w-full max-w-xl space-y-4">
             <QueryInput onSubmit={ask} />
@@ -52,25 +68,35 @@ export default function Dashboard() {
       ) : (
         <div className="space-y-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <p className="text-base font-medium text-ink sm:text-lg">{question}</p>
-            <button onClick={reset} className="btn-ghost shrink-0">New question</button>
+            <p className="text-base font-medium text-ink sm:text-lg">
+              {question}
+            </p>
+            <button onClick={reset} className="btn-ghost shrink-0">
+              New question
+            </button>
           </div>
 
           {status === "processing" && (
-            <ProcessingTimeline stages={pipelineStagesInitial} activeIndex={processingStage} />
+            <ProcessingTimeline
+              stages={pipelineStagesInitial}
+              activeIndex={processingStage}
+            />
           )}
 
           {status === "clarifying" && clarification && (
             <ClarificationPanel
               question={clarification.question}
-              options={clarification.options}
+              questions={clarification.questions}
               selectedId={selectedChoice}
               onSelect={selectClarification}
             />
           )}
 
           {status === "generating" && (
-            <ProcessingTimeline stages={pipelineStagesAfterClarification} activeIndex={generatingStage} />
+            <ProcessingTimeline
+              stages={pipelineStagesAfterClarification}
+              activeIndex={generatingStage}
+            />
           )}
 
           {status === "error" && (

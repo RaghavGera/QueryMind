@@ -15,6 +15,8 @@ needed if the pipeline couldn't safely produce a query.
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from fastapi.middleware.cors import CORSMiddleware
+import os
 
 from app.ambiguity_detector import AmbiguityDetector
 from app.database import Database, get_db, init_db
@@ -25,9 +27,26 @@ from app.sql_generator import SQLGenerator
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Text-to-SQL System",
-    description="Natural language to SQL, with ambiguity detection and clarification",
-    version="0.4.0"
+    title="QueryMind API",
+    description="Natural language to SQL",
+    version="0.5.0"
+)
+
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "BACKEND_CORS_ORIGINS",
+        "http://localhost:5173,http://localhost:4173,https://query-mind-tawny.vercel.app",
+    ).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -41,45 +60,159 @@ async def startup_event():
 
 
 def _schema_context(schema: DatabaseSchema) -> dict:
-    """Build the {table: [columns]} shape Phase 2's NLU modules expect."""
-    return {name: list(table.columns.keys()) for name, table in schema.tables.items()}
+    relationships = []
+
+    for table_name, table in schema.tables.items():
+        for fk in table.foreign_keys:
+            relationships.append(
+                f"{table_name}.{fk.column} -> "
+                f"{fk.referenced_table}.{fk.referenced_column}"
+            )
+
+    return {
+        "tables": list(schema.tables.keys()),
+
+        "columns": {
+            name: list(table.columns.keys())
+            for name, table in schema.tables.items()
+        },
+
+        "relationships": relationships,
+    }
 
 
 class QueryRequest(BaseModel):
     question: str
+    clarification_context: str | None = None
     strict: bool = True
     allow_full_table_write: bool = False
 
 
 @app.post("/query")
-async def run_query(request: QueryRequest, db: Database = Depends(get_db)) -> dict:
-    """
-    Convert a natural language question into SQL.
+async def run_query(
+    request: QueryRequest,
+    db: Database = Depends(get_db)
+):
+    question = request.question.strip()
 
-    Chains schema introspection -> intent extraction -> ambiguity
-    detection -> SQL generation. Returns the generated SQL and params on
-    success, or clarification questions / an error message when the
-    pipeline can't safely proceed. The SQL is returned, not executed.
-    """
+    if not question:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Question cannot be empty."}
+        )
+
+    if request.clarification_context:
+        question = (
+            f"{question}\n\n"
+            f"User clarification: "
+            f"{request.clarification_context.strip()}"
+        )
+
     try:
         schema = SchemaIntrospector(db).introspect()
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": f"Schema introspection failed: {str(e)}"})
+    except Exception as exc:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "error": "Database schema could not be inspected.",
+                "details": str(exc),
+                "result": {"columns": [], "rows": []},
+            },
+        )
 
     try:
-        query_intent = extract_intent(request.question, _schema_context(schema))
-    except Exception as e:
-        return JSONResponse(status_code=502, content={"error": f"Intent extraction failed: {str(e)}"})
+        query_intent = extract_intent(
+            question,
+            _schema_context(schema)
+        )
+    except Exception as exc:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "status": "error",
+                "error": "Natural-language intent could not be extracted.",
+                "details": str(exc),
+                "result": {"columns": [], "rows": []},
+            },
+        )
 
     try:
-        structured_intent = convert_query_intent(query_intent, request.question)
-    except IntentConversionError as e:
-        return JSONResponse(status_code=422, content={"error": str(e)})
+        structured_intent = convert_query_intent(
+            query_intent,
+            question,
+            schema=schema,
+        )
+    except IntentConversionError as exc:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "status": "error",
+                "error": "The extracted intent could not be converted into a safe SQL plan.",
+                "details": str(exc),
+                "result": {"columns": [], "rows": []},
+            },
+        )
 
-    generator = SQLGenerator(schema, AmbiguityDetector(schema), strict=request.strict)
-    result = generator.generate(structured_intent, allow_full_table_write=request.allow_full_table_write)
+    generator = SQLGenerator(
+        schema,
+        AmbiguityDetector(schema),
+        strict=request.strict,
+    )
 
-    return result.to_dict()
+    generated = generator.generate(
+        structured_intent,
+        allow_full_table_write=request.allow_full_table_write,
+    )
+
+    payload = generated.to_dict()
+
+    if (
+        generated.status.value in {
+            "success",
+            "success_with_warnings"
+        }
+        and generated.sql
+    ):
+        with open("generated_sql_debug.txt", "w", encoding="utf-8") as f:
+            f.write("SQL:\n")
+            f.write(generated.sql)
+            f.write("\n\nPARAMS:\n")
+            f.write(repr(generated.params))
+        try:
+            rows = db.execute_query(
+                generated.sql,
+                tuple(generated.params)
+            )
+        except Exception as exc:
+            payload = {
+                "status": "error",
+                "error": "Generated SQL could not be executed.",
+                "details": str(exc),
+                "sql": generated.sql,
+                "params": generated.params,
+                "result": {"columns": [], "rows": []},
+            }
+            return payload
+
+        columns = (
+            list(rows[0].keys())
+            if rows
+            else []
+        )
+
+        payload["result"] = {
+            "columns": columns,
+            "rows": rows,
+        }
+
+    else:
+        payload["result"] = {
+            "columns": [],
+            "rows": [],
+        }
+
+    return payload
 
 
 @app.get("/health")

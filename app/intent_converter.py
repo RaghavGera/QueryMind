@@ -17,6 +17,7 @@ produce something valid, instead of silently guessing at something that
 could be wrong.
 """
 
+import re
 from typing import Any, Dict, List, Optional
 
 from app.intent_extractor import QueryIntent
@@ -25,11 +26,14 @@ from app.models import (
     AggregationType,
     Condition,
     ConditionOperator,
+    Join,
+    JoinType,
     OrderBy,
     OrderDirection,
     QueryType,
     StructuredIntent,
 )
+from app.schema import DatabaseSchema
 
 
 class IntentConversionError(Exception):
@@ -88,6 +92,11 @@ _AGGREGATION_MAP = {
     "group_concat": AggregationType.GROUP_CONCAT,
 }
 
+_AGGREGATION_EXPRESSION = re.compile(
+    r"^(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\s*\(\s*(.*?)\s*\)$",
+    re.IGNORECASE,
+)
+
 
 def convert_condition(raw: Dict[str, Any]) -> Condition:
     """Convert one LLM-produced condition dict into a Condition."""
@@ -104,37 +113,147 @@ def convert_condition(raw: Dict[str, Any]) -> Condition:
     )
 
 
-def convert_aggregations(agg_names: List[str], columns: List[str]) -> Aggregation:
+def convert_aggregations(
+    agg_names: List[str],
+    columns: List[str]
+) -> Aggregation:
     """
-    Pair Phase 2's bare aggregation-function names with columns.
+    Convert aggregation specifications from Phase 2 into Aggregation objects.
 
-    Phase 2's schema only gives aggregation *names* (e.g. "COUNT"), not a
-    column/alias binding, so this pairs each aggregation positionally with
-    a column from the intent's column list, falling back to COUNT(*) when
-    there's no column to pair with.
+    Supports both formats:
+
+        ["SUM", "COUNT"]
+
+    and:
+
+        ["SUM(order_items.quantity)", "COUNT(order_items.id)"]
+
+    The latter is useful when the LLM binds the aggregation function
+    directly to a column.
     """
     aggregations = []
-    for i, name in enumerate(agg_names):
-        agg_type = _AGGREGATION_MAP.get(str(name).strip().lower())
-        if agg_type is None:
-            raise IntentConversionError(f"Unrecognized aggregation function: '{name}'")
 
-        column = columns[i] if i < len(columns) else None
-        if agg_type != AggregationType.COUNT and column is None:
+    expression_columns = []
+    plain_columns = []
+    for column_name in columns:
+        expression_match = _AGGREGATION_EXPRESSION.match(str(column_name).strip())
+        if expression_match:
+            expression_columns.append((expression_match.group(1), expression_match.group(2)))
+        else:
+            plain_columns.append(column_name)
+
+    for i, raw_name in enumerate(agg_names):
+        name = str(raw_name).strip()
+
+        column = None
+        expression_match = _AGGREGATION_EXPRESSION.match(name)
+        if expression_match:
+            name = expression_match.group(1)
+            column = expression_match.group(2)
+        else:
+            for expression_name, expression_column in expression_columns:
+                if expression_name.lower() == name.lower():
+                    column = expression_column
+                    break
+            if column is None and i < len(plain_columns):
+                column = plain_columns[i]
+
+        # Handle expressions such as:
+        #   SUM(order_items.quantity)
+        #   COUNT(order_items.id)
+        if "(" in name and name.endswith(")"):
+            function_name, explicit_column = name.split("(", 1)
+            function_name = function_name.strip()
+            explicit_column = explicit_column[:-1].strip()
+
+            # Use the column explicitly supplied by the LLM.
+            if explicit_column:
+                column = explicit_column
+
+            name = function_name
+
+        agg_type = _AGGREGATION_MAP.get(name.lower())
+
+        if agg_type is None:
             raise IntentConversionError(
-                f"Aggregation '{name}' needs a column to operate on, but none was provided."
+                f"Unrecognized aggregation function: '{raw_name}'"
             )
 
-        alias = f"{str(name).lower()}_{column}" if column else f"{str(name).lower()}_all"
-        aggregations.append(Aggregation(aggregation_type=agg_type, column=column, alias=alias))
+        # COUNT can operate on *.
+        if agg_type != AggregationType.COUNT and column is None:
+            raise IntentConversionError(
+                f"Aggregation '{raw_name}' needs a column to operate on, "
+                "but none was provided."
+            )
+
+        if column:
+            alias = f"{name.lower()}_{column.replace('.', '_')}"
+        else:
+            alias = f"{name.lower()}_all"
+
+        aggregations.append(
+            Aggregation(
+                aggregation_type=agg_type,
+                column=column,
+                alias=alias,
+            )
+        )
 
     return aggregations
 
+
+def _referenced_tables(
+    intent_tables: List[str], query_intent: QueryIntent, aggregations: List[Aggregation]
+) -> List[str]:
+    """Collect table qualifiers from converted expressions and dimensions."""
+    tables = list(intent_tables)
+    values = list(query_intent.columns) + list(query_intent.group_by or [])
+    if query_intent.order_by:
+        values.append(query_intent.order_by.get("column", ""))
+    values.extend(str(agg.column) for agg in aggregations if agg.column)
+    for value in values:
+        expression_match = _AGGREGATION_EXPRESSION.match(str(value).strip())
+        if expression_match:
+            value = expression_match.group(2)
+        if "." in value:
+            table = value.split(".", 1)[0]
+            if table not in tables:
+                tables.append(table)
+    return tables
+
+
+def _derive_fk_joins(tables: List[str], schema: Optional[DatabaseSchema]) -> List[Join]:
+    """Build joins only for direct foreign-key relationships in the schema."""
+    if schema is None:
+        return []
+
+    joins = []
+    seen = set()
+    for left_table in tables:
+        table_info = schema.tables.get(left_table)
+        if not table_info:
+            continue
+        for fk in table_info.foreign_keys:
+            if fk.referenced_table not in tables:
+                continue
+            key = (left_table, fk.referenced_table, fk.column, fk.referenced_column)
+            if key in seen:
+                continue
+            joins.append(Join(
+                join_type=JoinType.INNER,
+                left_table=left_table,
+                right_table=fk.referenced_table,
+                left_column=fk.column,
+                right_column=fk.referenced_column,
+            ))
+            seen.add(key)
+    return joins
 
 def convert_query_intent(
     query_intent: QueryIntent,
     original_question: str,
     confidence_score: float = 0.0,
+    schema: Optional[DatabaseSchema] = None,
 ) -> StructuredIntent:
     """
     Convert a Phase 2 QueryIntent (LLM output) into a Phase 3/4 StructuredIntent.
@@ -165,12 +284,18 @@ def convert_query_intent(
         # Columns consumed by an aggregation shouldn't also appear as a
         # plain SELECT column (they're expressed via `aggregations` instead).
         consumed = {a.column for a in aggregations if a.column}
-        columns = [c for c in columns if c not in consumed]
+        columns = [
+            c for c in columns
+            if c not in consumed and not _AGGREGATION_EXPRESSION.match(str(c).strip())
+        ]
 
     order_by: List[OrderBy] = []
     if query_intent.order_by:
         direction = OrderDirection.DESC if query_intent.order_by.get("direction", "asc").lower() == "desc" else OrderDirection.ASC
         order_by = [OrderBy(column=query_intent.order_by["column"], direction=direction)]
+
+    tables = _referenced_tables(list(query_intent.tables), query_intent, aggregations)
+    joins = _derive_fk_joins(tables, schema)
 
     if query_type in (QueryType.INSERT, QueryType.UPDATE):
         # Phase 2's function schema has no slot for insert/update payload
@@ -184,9 +309,10 @@ def convert_query_intent(
 
     return StructuredIntent(
         query_type=query_type,
-        tables=list(query_intent.tables),
+        tables=tables,
         columns=columns,
         conditions=conditions,
+        joins=joins,
         aggregations=aggregations,
         group_by=list(query_intent.group_by or []),
         order_by=order_by,
