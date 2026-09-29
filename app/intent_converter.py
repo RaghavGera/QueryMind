@@ -286,10 +286,18 @@ def convert_query_intent(
         aggregations = convert_aggregations(query_intent.aggregations, columns)
         # Columns consumed by an aggregation shouldn't also appear as a
         # plain SELECT column (they're expressed via `aggregations` instead).
+        # Compare unqualified names too: the model may emit "customer_id" in
+        # columns while the aggregation binds "customers.customer_id".
+        def _simple_name(name: str) -> str:
+            return str(name).split(".")[-1].strip().lower()
+
         consumed = {a.column for a in aggregations if a.column}
+        consumed_simple = {_simple_name(c) for c in consumed}
         columns = [
             c for c in columns
-            if c not in consumed and not _AGGREGATION_EXPRESSION.match(str(c).strip())
+            if c not in consumed
+            and _simple_name(c) not in consumed_simple
+            and not _AGGREGATION_EXPRESSION.match(str(c).strip())
         ]
 
     order_by: List[OrderBy] = []

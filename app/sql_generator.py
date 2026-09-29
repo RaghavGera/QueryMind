@@ -415,6 +415,7 @@ class SQLGenerator:
         params: List[Any] = []
 
         base_table = self._base_table(intent)
+        joined_tables = {base_table}
 
         select_parts: List[str] = []
         for col in intent.columns:
@@ -429,9 +430,12 @@ class SQLGenerator:
         sql = f"SELECT {distinct}{', '.join(select_parts)}\nFROM {self._quote_ident(base_table)}"
 
         for join in intent.joins:
-            join_sql, join_params = self._render_join(join)
+            join_sql, join_params = self._render_join(join, joined_tables)
             sql += f"\n{join_sql}"
             params.extend(join_params)
+            joined_tables.update((join.left_table, join.right_table))
+            if join.alias:
+                joined_tables.add(join.alias)
 
         if intent.conditions:
             where_sql, where_params = self._build_condition_clause(intent.conditions)
@@ -528,13 +532,24 @@ class SQLGenerator:
             return intent.tables[0]
         raise SQLGenerationError("No table specified for query.")
 
-    def _render_join(self, join: Join) -> Tuple[str, List[Any]]:
+    def _render_join(self, join: Join, joined_tables: set) -> Tuple[str, List[Any]]:
+        # The JOIN target must be a table not already in the FROM/JOIN chain.
+        # FK-derived joins are built as left_table (FK holder) -> right_table
+        # (referenced table), but when the referenced table is already the
+        # FROM table, joining it again is invalid SQL ("table name specified
+        # more than once"). In that case swap sides and join the FK holder.
+        if join.right_table in joined_tables and join.left_table not in joined_tables:
+            target_table, target_column = join.left_table, join.left_column
+            source_table, source_column = join.right_table, join.right_column
+        else:
+            target_table, target_column = join.right_table, join.right_column
+            source_table, source_column = join.left_table, join.left_column
         alias_sql = f" AS {self._quote_ident(join.alias)}" if join.alias else ""
-        right_ref = self._quote_ident(join.alias) if join.alias else self._quote_ident(join.right_table)
+        target_ref = self._quote_ident(join.alias) if join.alias else self._quote_ident(target_table)
         sql = (
-            f"{join.join_type.value} {self._quote_ident(join.right_table)}{alias_sql} "
-            f"ON {self._qualify(f'{join.left_table}.{join.left_column}')} = "
-            f"{right_ref}.{self._quote_ident(join.right_column)}"
+            f"{join.join_type.value} {self._quote_ident(target_table)}{alias_sql} "
+            f"ON {self._qualify(f'{source_table}.{source_column}')} = "
+            f"{target_ref}.{self._quote_ident(target_column)}"
         )
         return sql, []
 

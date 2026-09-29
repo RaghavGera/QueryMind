@@ -1,0 +1,145 @@
+diff --git a/app/intent_converter.py b/app/intent_converter.py
+index c5f9af6..b44f7cb 100644
+--- a/app/intent_converter.py
++++ b/app/intent_converter.py
+@@ -286,10 +286,18 @@ def convert_query_intent(
+         aggregations = convert_aggregations(query_intent.aggregations, columns)
+         # Columns consumed by an aggregation shouldn't also appear as a
+         # plain SELECT column (they're expressed via `aggregations` instead).
++        # Compare unqualified names too: the model may emit "customer_id" in
++        # columns while the aggregation binds "customers.customer_id".
++        def _simple_name(name: str) -> str:
++            return str(name).split(".")[-1].strip().lower()
++
+         consumed = {a.column for a in aggregations if a.column}
++        consumed_simple = {_simple_name(c) for c in consumed}
+         columns = [
+             c for c in columns
+-            if c not in consumed and not _AGGREGATION_EXPRESSION.match(str(c).strip())
++            if c not in consumed
++            and _simple_name(c) not in consumed_simple
++            and not _AGGREGATION_EXPRESSION.match(str(c).strip())
+         ]
+ 
+     order_by: List[OrderBy] = []
+diff --git a/app/sql_generator.py b/app/sql_generator.py
+index c87acde..cb7543c 100644
+--- a/app/sql_generator.py
++++ b/app/sql_generator.py
+@@ -415,6 +415,7 @@ class SQLGenerator:
+         params: List[Any] = []
+ 
+         base_table = self._base_table(intent)
++        joined_tables = {base_table}
+ 
+         select_parts: List[str] = []
+         for col in intent.columns:
+@@ -429,9 +430,12 @@ class SQLGenerator:
+         sql = f"SELECT {distinct}{', '.join(select_parts)}\nFROM {self._quote_ident(base_table)}"
+ 
+         for join in intent.joins:
+-            join_sql, join_params = self._render_join(join)
++            join_sql, join_params = self._render_join(join, joined_tables)
+             sql += f"\n{join_sql}"
+             params.extend(join_params)
++            joined_tables.update((join.left_table, join.right_table))
++            if join.alias:
++                joined_tables.add(join.alias)
+ 
+         if intent.conditions:
+             where_sql, where_params = self._build_condition_clause(intent.conditions)
+@@ -528,13 +532,24 @@ class SQLGenerator:
+             return intent.tables[0]
+         raise SQLGenerationError("No table specified for query.")
+ 
+-    def _render_join(self, join: Join) -> Tuple[str, List[Any]]:
++    def _render_join(self, join: Join, joined_tables: set) -> Tuple[str, List[Any]]:
++        # The JOIN target must be a table not already in the FROM/JOIN chain.
++        # FK-derived joins are built as left_table (FK holder) -> right_table
++        # (referenced table), but when the referenced table is already the
++        # FROM table, joining it again is invalid SQL ("table name specified
++        # more than once"). In that case swap sides and join the FK holder.
++        if join.right_table in joined_tables and join.left_table not in joined_tables:
++            target_table, target_column = join.left_table, join.left_column
++            source_table, source_column = join.right_table, join.right_column
++        else:
++            target_table, target_column = join.right_table, join.right_column
++            source_table, source_column = join.left_table, join.left_column
+         alias_sql = f" AS {self._quote_ident(join.alias)}" if join.alias else ""
+-        right_ref = self._quote_ident(join.alias) if join.alias else self._quote_ident(join.right_table)
++        target_ref = self._quote_ident(join.alias) if join.alias else self._quote_ident(target_table)
+         sql = (
+-            f"{join.join_type.value} {self._quote_ident(join.right_table)}{alias_sql} "
+-            f"ON {self._qualify(f'{join.left_table}.{join.left_column}')} = "
+-            f"{right_ref}.{self._quote_ident(join.right_column)}"
++            f"{join.join_type.value} {self._quote_ident(target_table)}{alias_sql} "
++            f"ON {self._qualify(f'{source_table}.{source_column}')} = "
++            f"{target_ref}.{self._quote_ident(target_column)}"
+         )
+         return sql, []
+ 
+diff --git a/testing/test_expression_aggregations.py b/testing/test_expression_aggregations.py
+index 1fcac74..4d06464 100644
+--- a/testing/test_expression_aggregations.py
++++ b/testing/test_expression_aggregations.py
+@@ -121,4 +121,60 @@ check("status is SUCCESS", result.status == GenerationStatus.SUCCESS)
+ check("renders plain column", 'SUM("order_items"."quantity")' in result.sql)
+ 
+ print(f"\nResult: {passed}/{passed + failed} checks passed")
++if failed:
++    sys.exit(1)
++
++# ---------------------------------------------------------------------
++# TEST 6: join direction — FK holder joins when referenced table is FROM
++# ---------------------------------------------------------------------
++print("TEST 6: join swaps sides when right table is already the FROM table")
++from app.models import JoinType
++intent = StructuredIntent(
++    query_type=QueryType.AGGREGATE,
++    tables=["orders", "customers", "order_items"],
++    columns=["customers.country"],
++    group_by=["customers.country"],
++    aggregations=[Aggregation(
++        aggregation_type=AggregationType.SUM,
++        column="order_items.quantity * order_items.unit_price",
++        alias="total_revenue",
++    )],
++    joins=[
++        Join(join_type=JoinType.INNER, left_table="orders", left_column="customer_id",
++             right_table="customers", right_column="customer_id"),
++        # right_table ("orders") is the FROM table: must swap to join order_items
++        Join(join_type=JoinType.INNER, left_table="order_items", left_column="order_id",
++             right_table="orders", right_column="order_id"),
++    ],
++    original_question="revenue per country",
++)
++result = gen.generate(intent)
++print("  SQL:", result.sql.replace("\n", " ") if result.sql else None)
++check("status is SUCCESS", result.status == GenerationStatus.SUCCESS)
++check(
++    "joins order_items, not orders twice",
++    result.sql is not None and 'INNER JOIN "order_items" ON "orders"."order_id" = "order_items"."order_id"' in result.sql,
++)
++check(
++    "no duplicate table",
++    result.sql is not None and result.sql.count('FROM "orders"') == 1,
++)
++
++# ---------------------------------------------------------------------
++# TEST 7: converter dedups qualified/unqualified aggregation columns
++# ---------------------------------------------------------------------
++print("TEST 7: converter drops plain column consumed by qualified aggregation")
++from app.intent_converter import convert_query_intent
++from app.intent_extractor import QueryIntent
++qi = QueryIntent(
++    query_type="count",
++    tables=["customers"],
++    columns=["customer_id", "COUNT(customers.customer_id)"],
++    aggregations=["count"],
++)
++si = convert_query_intent(qi, "How many customers?", schema=schema)
++check("plain column removed", si.columns == [])
++check("aggregation kept", len(si.aggregations) == 1 and si.aggregations[0].column == "customers.customer_id")
++
++print(f"\nFinal result: {passed}/{passed + failed} checks passed")
+ sys.exit(0 if failed == 0 else 1)

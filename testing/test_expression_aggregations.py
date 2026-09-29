@@ -121,4 +121,60 @@ check("status is SUCCESS", result.status == GenerationStatus.SUCCESS)
 check("renders plain column", 'SUM("order_items"."quantity")' in result.sql)
 
 print(f"\nResult: {passed}/{passed + failed} checks passed")
+if failed:
+    sys.exit(1)
+
+# ---------------------------------------------------------------------
+# TEST 6: join direction — FK holder joins when referenced table is FROM
+# ---------------------------------------------------------------------
+print("TEST 6: join swaps sides when right table is already the FROM table")
+from app.models import JoinType
+intent = StructuredIntent(
+    query_type=QueryType.AGGREGATE,
+    tables=["orders", "customers", "order_items"],
+    columns=["customers.country"],
+    group_by=["customers.country"],
+    aggregations=[Aggregation(
+        aggregation_type=AggregationType.SUM,
+        column="order_items.quantity * order_items.unit_price",
+        alias="total_revenue",
+    )],
+    joins=[
+        Join(join_type=JoinType.INNER, left_table="orders", left_column="customer_id",
+             right_table="customers", right_column="customer_id"),
+        # right_table ("orders") is the FROM table: must swap to join order_items
+        Join(join_type=JoinType.INNER, left_table="order_items", left_column="order_id",
+             right_table="orders", right_column="order_id"),
+    ],
+    original_question="revenue per country",
+)
+result = gen.generate(intent)
+print("  SQL:", result.sql.replace("\n", " ") if result.sql else None)
+check("status is SUCCESS", result.status == GenerationStatus.SUCCESS)
+check(
+    "joins order_items, not orders twice",
+    result.sql is not None and 'INNER JOIN "order_items" ON "orders"."order_id" = "order_items"."order_id"' in result.sql,
+)
+check(
+    "no duplicate table",
+    result.sql is not None and result.sql.count('FROM "orders"') == 1,
+)
+
+# ---------------------------------------------------------------------
+# TEST 7: converter dedups qualified/unqualified aggregation columns
+# ---------------------------------------------------------------------
+print("TEST 7: converter drops plain column consumed by qualified aggregation")
+from app.intent_converter import convert_query_intent
+from app.intent_extractor import QueryIntent
+qi = QueryIntent(
+    query_type="count",
+    tables=["customers"],
+    columns=["customer_id", "COUNT(customers.customer_id)"],
+    aggregations=["count"],
+)
+si = convert_query_intent(qi, "How many customers?", schema=schema)
+check("plain column removed", si.columns == [])
+check("aggregation kept", len(si.aggregations) == 1 and si.aggregations[0].column == "customers.customer_id")
+
+print(f"\nFinal result: {passed}/{passed + failed} checks passed")
 sys.exit(0 if failed == 0 else 1)
