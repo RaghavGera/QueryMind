@@ -10,7 +10,7 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 import json
 from app.openai_client import get_openai_client
-
+from datetime import date
 
 class QueryIntent(BaseModel):
     """
@@ -98,7 +98,8 @@ def extract_intent(question: str, schema_context: dict) -> QueryIntent:
                         "properties": {
                             "column": {"type": "string"},
                             "operator": {"type": "string"},
-                            "value": {"type": ["string", "number", "boolean", "null"]}
+                            "value": {"type": ["string", "number", "boolean", "null", "array"],
+                                      "description": "Single value, or a list of exactly two values when operator is BETWEEN"}
                         }
                     },
                     "description": "WHERE clause conditions"
@@ -138,12 +139,14 @@ Given a user's question and the database schema, identify:
 - Any filtering conditions (WHERE clauses)
 - Aggregation functions needed
 - Grouping and sorting requirements
+- Date handling: resolve relative phrases ("last month", "this quarter", "yesterday") into concrete ISO dates (YYYY-MM-DD) using the current date below. BETWEEN requires a list of exactly two values, e.g. ["2026-08-01", "2026-08-31"]. Never pass a relative phrase as a condition value.
+
 
 Use the provided schema to ensure table and column names are valid."""
 
     user_prompt = f"""Database Schema:
 {schema_description}
-
+Current date: {date.today().isoformat()}
 User Question: {question}
 
 Extract the structured query intent from this question."""
@@ -158,7 +161,8 @@ Extract the structured query intent from this question."""
             ],
             functions=[function_schema],
             function_call={"name": "extract_query_intent"},
-            temperature=0.1  # Low temperature for more deterministic outputs
+            temperature=0.1,  # Low temperature for more deterministic outputs
+            max_tokens=800
         )
 
         # Extract the function call response
