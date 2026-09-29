@@ -140,6 +140,8 @@ Given a user's question and the database schema, identify:
 - Aggregation functions needed
 - Grouping and sorting requirements
 - Date handling: resolve relative phrases ("last month", "this quarter", "yesterday") into concrete ISO dates (YYYY-MM-DD) using the current date below. BETWEEN requires a list of exactly two values, e.g. ["2026-08-01", "2026-08-31"]. Never pass a relative phrase as a condition value.
+- Concept mapping: if the question uses a concept with no matching column (e.g. "region" when the schema only has "country"), map it to the closest available column. If no close match exists, do not invent a column.
+- Computed metrics: express metrics like revenue as arithmetic over real columns (e.g. quantity * unit_price). The engine supports arithmetic expressions inside aggregations, so emit them directly, e.g. "SUM(order_items.quantity * order_items.unit_price)".
 
 
 Use the provided schema to ensure table and column names are valid."""

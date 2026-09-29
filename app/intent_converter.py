@@ -187,7 +187,10 @@ def convert_aggregations(
             )
 
         if column:
-            alias = f"{name.lower()}_{column.replace('.', '_')}"
+            # Sanitize so expression columns (e.g. "order_items.quantity * order_items.unit_price")
+            # produce valid aliases. Plain columns are unaffected.
+            safe_column = re.sub(r"\W+", "_", column).strip("_")
+            alias = f"{name.lower()}_{safe_column}"
         else:
             alias = f"{name.lower()}_all"
 

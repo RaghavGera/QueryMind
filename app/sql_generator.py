@@ -59,6 +59,16 @@ class SQLGenerationError(Exception):
     """Raised for hard generation failures (unknown table/column, bad shape)."""
 
 
+# A plain [table.]column identifier, e.g. "quantity" or "order_items.quantity".
+_PLAIN_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?\Z")
+# Identifier tokens inside an arithmetic expression.
+_EXPRESSION_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?")
+# Only these characters may appear in an arithmetic expression: identifiers,
+# numbers, whitespace, arithmetic operators and parentheses. Anything else
+# (quotes, semicolons, SQL keywords) is rejected.
+_EXPRESSION_SAFE_CHARS = re.compile(r"[\w.\s+\-*/()]+\Z")
+
+
 class GenerationStatus(str, Enum):
     """Outcome of a SQL generation attempt."""
     SUCCESS = "success"                        # Clean generation, nothing to flag
@@ -258,6 +268,64 @@ class SQLGenerator:
                     f"Table '{table}' does not exist in the schema and no similar table was found."
                 )
 
+    def _validate_single_identifier(
+        self,
+        reference: str,
+        context: str,
+        intent: StructuredIntent,
+        schema_tables: set,
+        referenced_tables: set,
+        unresolved_tables: set,
+    ) -> None:
+        """Validate one plain [table.]column identifier against the schema."""
+        if "." in reference:
+            table, column = reference.split(".", 1)
+            if table not in schema_tables and table not in unresolved_tables:
+                raise SQLGenerationError(f"Table '{table}' in {context} does not exist in the schema.")
+            if table in unresolved_tables:
+                return
+            if column not in self.schema.tables[table].columns:
+                raise SQLGenerationError(f"Column '{reference}' in {context} does not exist in the schema.")
+        else:
+            if not any(
+                table in self.schema.tables and reference in self.schema.tables[table].columns
+                for table in referenced_tables
+            ) and not (referenced_tables & unresolved_tables) \
+                    and reference not in {condition.column for condition in intent.having_conditions}:
+                raise SQLGenerationError(f"Column '{reference}' in {context} does not exist in the schema.")
+
+    def _validate_arithmetic_expression(
+        self,
+        expression: str,
+        context: str,
+        intent: StructuredIntent,
+        schema_tables: set,
+        referenced_tables: set,
+        unresolved_tables: set,
+    ) -> None:
+        """
+        Validate an arithmetic expression over schema columns, e.g.
+        "order_items.quantity * order_items.unit_price". Every identifier in
+        the expression must resolve to a real column; anything else is
+        rejected so model output can't smuggle arbitrary SQL through.
+        """
+        if not _EXPRESSION_SAFE_CHARS.fullmatch(expression):
+            raise SQLGenerationError(f"Invalid {context} expression '{expression}'.")
+        identifiers = [
+            token for token in _EXPRESSION_IDENTIFIER.findall(expression)
+            if not re.fullmatch(r"\d+(\.\d+)?", token)
+        ]
+        if not identifiers:
+            raise SQLGenerationError(f"Invalid {context} expression '{expression}'.")
+        for identifier in identifiers:
+            self._validate_single_identifier(
+                identifier, context, intent, schema_tables, referenced_tables, unresolved_tables
+            )
+
+    def _render_arithmetic_expression(self, expression: str) -> str:
+        """Render an arithmetic expression, quoting each identifier."""
+        return _EXPRESSION_IDENTIFIER.sub(lambda m: self._qualify(m.group(0)), expression)
+
     def _validate_identifiers(
         self,
         intent: StructuredIntent,
@@ -277,26 +345,32 @@ class SQLGenerator:
             if table not in schema_tables and table not in unresolved_tables:
                 raise SQLGenerationError(f"Table '{table}' does not exist in the schema.")
 
-        def validate_reference(reference: str, context: str, allow_aggregate: bool = False) -> None:
-            if allow_aggregate and self._parse_aggregate_expression(reference):
+        def validate_reference(reference: str, context: str, allow_aggregate: bool = False, allow_expression: bool = False) -> None:
+            if allow_aggregate:
+                parts = self._parse_aggregate_expression_parts(reference)
+                if parts:
+                    _, inner = parts
+                    if inner.strip() == "*":
+                        return
+                    if _PLAIN_IDENTIFIER.fullmatch(inner.strip()):
+                        self._validate_single_identifier(
+                            inner, context, intent, schema_tables, referenced_tables, unresolved_tables
+                        )
+                    else:
+                        self._validate_arithmetic_expression(
+                            inner, context, intent, schema_tables, referenced_tables, unresolved_tables
+                        )
+                    return
+            if allow_expression and not _PLAIN_IDENTIFIER.fullmatch(reference.strip()):
+                self._validate_arithmetic_expression(
+                    reference, context, intent, schema_tables, referenced_tables, unresolved_tables
+                )
                 return
             if "(" in reference or ")" in reference:
                 raise SQLGenerationError(f"Invalid {context} expression '{reference}'.")
-            if "." in reference:
-                table, column = reference.split(".", 1)
-                if table not in schema_tables and table not in unresolved_tables:
-                    raise SQLGenerationError(f"Table '{table}' in {context} does not exist in the schema.")
-                if table in unresolved_tables:
-                    return
-                if column not in self.schema.tables[table].columns:
-                    raise SQLGenerationError(f"Column '{reference}' in {context} does not exist in the schema.")
-            else:
-                if not any(
-                    table in self.schema.tables and reference in self.schema.tables[table].columns
-                    for table in referenced_tables
-                ) and not (referenced_tables & unresolved_tables) \
-                        and reference not in {condition.column for condition in intent.having_conditions}:
-                    raise SQLGenerationError(f"Column '{reference}' in {context} does not exist in the schema.")
+            self._validate_single_identifier(
+                reference, context, intent, schema_tables, referenced_tables, unresolved_tables
+            )
 
         for column in intent.columns:
             validate_reference(column, "SELECT")
@@ -304,7 +378,7 @@ class SQLGenerator:
             validate_reference(column, "GROUP BY")
         for aggregation in intent.aggregations:
             if aggregation.column:
-                validate_reference(aggregation.column, "aggregation")
+                validate_reference(aggregation.column, "aggregation", allow_expression=True)
         for order in intent.order_by:
             validate_reference(order.column, "ORDER BY", allow_aggregate=True)
         for condition in intent.conditions + intent.having_conditions:
@@ -469,11 +543,14 @@ class SQLGenerator:
             expr = "COUNT(*)"
         else:
             distinct = "DISTINCT " if agg.distinct else ""
-            col = self._qualify(agg.column) if agg.column else "*"
+            if agg.column and not _PLAIN_IDENTIFIER.fullmatch(agg.column.strip()):
+                col = self._render_arithmetic_expression(agg.column)
+            else:
+                col = self._qualify(agg.column) if agg.column else "*"
             expr = f"{agg.aggregation_type.value}({distinct}{col})"
         return f"{expr} AS {self._quote_ident(agg.alias)}" if agg.alias else expr
 
-    def _parse_aggregate_expression(self, value: str) -> Optional[str]:
+    def _parse_aggregate_expression_parts(self, value: str) -> Optional[Tuple[str, str]]:
         match = re.match(
             r"^(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\s*\(\s*(.*?)\s*\)$",
             value.strip(),
@@ -481,10 +558,20 @@ class SQLGenerator:
         )
         if not match:
             return None
-        function_name, column = match.groups()
+        return match.group(1), match.group(2)
+
+    def _parse_aggregate_expression(self, value: str) -> Optional[str]:
+        parts = self._parse_aggregate_expression_parts(value)
+        if not parts:
+            return None
+        function_name, column = parts
         if column == "*":
             return f"{function_name.upper()}(*)"
-        return f"{function_name.upper()}({self._qualify(column)})"
+        if _PLAIN_IDENTIFIER.fullmatch(column.strip()):
+            rendered = self._qualify(column)
+        else:
+            rendered = self._render_arithmetic_expression(column)
+        return f"{function_name.upper()}({rendered})"
 
     def _render_order_expression(self, value: str) -> str:
         expression = self._parse_aggregate_expression(value)
