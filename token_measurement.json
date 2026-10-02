@@ -1,0 +1,514 @@
+[
+  {
+    "question": "Show all customers.",
+    "trimmed": true,
+    "before": 940,
+    "after": 872,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "List all products.",
+    "trimmed": true,
+    "before": 940,
+    "after": 874,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show all orders.",
+    "trimmed": true,
+    "before": 940,
+    "after": 911,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show all order items.",
+    "trimmed": true,
+    "before": 941,
+    "after": 912,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "List the names and emails of all customers.",
+    "trimmed": true,
+    "before": 945,
+    "after": 877,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show all products with their category and price.",
+    "trimmed": true,
+    "before": 945,
+    "after": 879,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show all orders with their order date and status.",
+    "trimmed": true,
+    "before": 946,
+    "after": 917,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show customers from India.",
+    "trimmed": true,
+    "before": 941,
+    "after": 873,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show products in the Electronics category.",
+    "trimmed": true,
+    "before": 943,
+    "after": 877,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show orders with status completed.",
+    "trimmed": true,
+    "before": 942,
+    "after": 913,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Find customers who signed up after January 1, 2025.",
+    "trimmed": true,
+    "before": 952,
+    "after": 884,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Find products costing more than 500.",
+    "trimmed": true,
+    "before": 1106,
+    "after": 1040,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Find products costing less than 100.",
+    "trimmed": true,
+    "before": 1106,
+    "after": 1040,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show orders placed after January 1, 2025.",
+    "trimmed": true,
+    "before": 950,
+    "after": 921,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show orders placed between January 1, 2025 and March 31, 2025.",
+    "trimmed": true,
+    "before": 961,
+    "after": 932,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Find customers whose country is India.",
+    "trimmed": true,
+    "before": 943,
+    "after": 875,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Find products whose price is between 100 and 500.",
+    "trimmed": true,
+    "before": 952,
+    "after": 886,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show cancelled orders.",
+    "trimmed": true,
+    "before": 940,
+    "after": 911,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show customers whose first name is John.",
+    "trimmed": true,
+    "before": 944,
+    "after": 876,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Find products in the Electronics or Clothing category.",
+    "trimmed": true,
+    "before": 945,
+    "after": 879,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "How many customers are there?",
+    "trimmed": true,
+    "before": 942,
+    "after": 874,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "How many products are there?",
+    "trimmed": true,
+    "before": 942,
+    "after": 876,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "How many orders are there?",
+    "trimmed": true,
+    "before": 942,
+    "after": 913,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What is the average product price?",
+    "trimmed": true,
+    "before": 943,
+    "after": 877,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What is the maximum product price?",
+    "trimmed": true,
+    "before": 943,
+    "after": 877,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What is the minimum product price?",
+    "trimmed": true,
+    "before": 943,
+    "after": 877,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "How many customers are from each country?",
+    "trimmed": true,
+    "before": 944,
+    "after": 876,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "How many products are in each category?",
+    "trimmed": true,
+    "before": 944,
+    "after": 878,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What is the average price of products in each category?",
+    "trimmed": true,
+    "before": 947,
+    "after": 881,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "How many orders exist for each status?",
+    "trimmed": true,
+    "before": 944,
+    "after": 915,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show all orders with the customer's first and last name.",
+    "trimmed": true,
+    "before": 949,
+    "after": 920,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show all orders placed by customers from India.",
+    "trimmed": true,
+    "before": 945,
+    "after": 916,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show each order item with the product name.",
+    "trimmed": false,
+    "before": 945,
+    "after": 945,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show each order item with the product name and category.",
+    "trimmed": false,
+    "before": 947,
+    "after": 947,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show each order with the customer's email.",
+    "trimmed": true,
+    "before": 946,
+    "after": 917,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show all products that have appeared in an order.",
+    "trimmed": false,
+    "before": 946,
+    "after": 946,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show all customers who have placed an order.",
+    "trimmed": true,
+    "before": 945,
+    "after": 916,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show the products purchased by customers from India.",
+    "trimmed": false,
+    "before": 945,
+    "after": 945,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show orders along with the products included in each order.",
+    "trimmed": false,
+    "before": 947,
+    "after": 947,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show the customer name, order date, product name, quantity, and unit price for every order item.",
+    "trimmed": false,
+    "before": 957,
+    "after": 957,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What are the top 10 most expensive products?",
+    "trimmed": true,
+    "before": 947,
+    "after": 881,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What are the 10 most frequently ordered products?",
+    "trimmed": true,
+    "before": 947,
+    "after": 912,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which products have generated the most revenue?",
+    "trimmed": true,
+    "before": 944,
+    "after": 909,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which customers have placed the most orders?",
+    "trimmed": true,
+    "before": 944,
+    "after": 915,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which countries have the most customers?",
+    "trimmed": true,
+    "before": 943,
+    "after": 875,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which product categories have the highest average price?",
+    "trimmed": true,
+    "before": 945,
+    "after": 879,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What is the total quantity sold for each product?",
+    "trimmed": true,
+    "before": 946,
+    "after": 911,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What is the total revenue generated by each product?",
+    "trimmed": true,
+    "before": 946,
+    "after": 911,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What is the total revenue generated by each category?",
+    "trimmed": true,
+    "before": 946,
+    "after": 911,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which customers have spent the most money?",
+    "trimmed": false,
+    "before": 944,
+    "after": 944,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What are the top 10 customers by total spending?",
+    "trimmed": false,
+    "before": 948,
+    "after": 948,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show the total amount spent by each customer.",
+    "trimmed": false,
+    "before": 945,
+    "after": 945,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which products generated more than 10,000 in revenue?",
+    "trimmed": true,
+    "before": 1111,
+    "after": 1076,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which categories generated the most revenue?",
+    "trimmed": false,
+    "before": 943,
+    "after": 943,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What is the average order value?",
+    "trimmed": false,
+    "before": 1077,
+    "after": 1077,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What is the total revenue from completed orders?",
+    "trimmed": false,
+    "before": 945,
+    "after": 945,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What are the top 5 products by quantity sold?",
+    "trimmed": true,
+    "before": 947,
+    "after": 912,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which customers have purchased products from the Electronics category?",
+    "trimmed": false,
+    "before": 946,
+    "after": 946,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "How much revenue has each customer generated?",
+    "trimmed": false,
+    "before": 944,
+    "after": 944,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show monthly revenue from orders.",
+    "trimmed": false,
+    "before": 1115,
+    "after": 1115,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which customers have placed more than 5 orders?",
+    "trimmed": true,
+    "before": 1106,
+    "after": 1077,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which products have been purchased more than 100 times?",
+    "trimmed": true,
+    "before": 1109,
+    "after": 1074,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Find the top 5 customers by spending on completed orders.",
+    "trimmed": false,
+    "before": 948,
+    "after": 948,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What is the average spending per customer?",
+    "trimmed": false,
+    "before": 1078,
+    "after": 1078,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  }
+]

@@ -133,13 +133,26 @@ def _prompt_tokens(provider, request: Dict, attempts: int = 5) -> int:
     raise RuntimeError("unreachable")
 
 
-def measure(questions: List[str], context: dict, provider_name: Optional[str], delay: float) -> List[Dict]:
+def measure(
+    questions: List[str],
+    context: dict,
+    provider_name: Optional[str],
+    delay: float,
+    json_out: Optional[str] = None,
+    rows: Optional[List[Dict]] = None,
+) -> List[Dict]:
+    """Measure each question; ``rows`` already measured (--resume) are skipped.
+    Results are written to ``json_out`` after every question, so an
+    interrupted run loses nothing."""
     import app.intent_extractor as extractor
 
     provider = _provider(provider_name)
     print(f"Measuring with provider={provider.name} model={provider.model}\n")
-    rows: List[Dict] = []
+    rows = list(rows or [])
+    done = {row["question"] for row in rows}
     for number, question in enumerate(questions, 1):
+        if question in done:
+            continue
         trimmed = extractor.trim_schema_context(question, context) is not context
         try:
             before = _prompt_tokens(provider, extractor.build_extraction_request(question, context, trim=False))
@@ -151,7 +164,10 @@ def measure(questions: List[str], context: dict, provider_name: Optional[str], d
         except _DailyQuotaReached:
             print(f"\nStopped at question {number}: daily quota reached ({len(rows)} measured).")
             break
-        rows.append({"question": question, "trimmed": trimmed, "before": before, "after": after})
+        rows.append({"question": question, "trimmed": trimmed, "before": before, "after": after,
+                     "provider": provider.name, "model": provider.model})
+        if json_out:
+            Path(json_out).write_text(json.dumps(rows, indent=2), encoding="utf-8")
         print(f"{before:5d} -> {after:5d}  {'trimmed ' if trimmed else 'fallback'}  {question}")
         time.sleep(delay)
     return rows
@@ -185,6 +201,8 @@ def main(argv=None) -> int:
     parser.add_argument("--limit", type=int, help="Only the first N questions")
     parser.add_argument("--delay", type=float, default=8.0, help="Seconds between calls (per-minute limits)")
     parser.add_argument("--json", dest="json_out", help="Write per-question results to this file")
+    parser.add_argument("--resume", action="store_true",
+                        help="Keep the results already in --json and measure only the remaining questions")
     args = parser.parse_args(argv)
 
     questions = parse_questions()
@@ -197,10 +215,12 @@ def main(argv=None) -> int:
         dry_run(questions, context)
         return 0
 
-    rows = measure(questions, context, args.provider, args.delay)
+    previous = []
+    if args.resume and args.json_out and Path(args.json_out).exists():
+        previous = json.loads(Path(args.json_out).read_text(encoding="utf-8"))
+        print(f"Resuming: {len(previous)} question(s) already measured\n")
+    rows = measure(questions, context, args.provider, args.delay, args.json_out, previous)
     summarize(rows)
-    if args.json_out:
-        Path(args.json_out).write_text(json.dumps(rows, indent=2), encoding="utf-8")
     return 0
 
 
