@@ -102,15 +102,38 @@ def _provider(name: Optional[str]):
     return providers[0]
 
 
-def _prompt_tokens(provider, request: Dict) -> int:
-    response = provider.client.chat.completions.create(
-        model=provider.model, tool_choice=provider.tool_choice, **request
-    )
-    return int(response.usage.prompt_tokens)
+class _DailyQuotaReached(Exception):
+    pass
+
+
+def _prompt_tokens(provider, request: Dict, attempts: int = 5) -> int:
+    """usage.prompt_tokens for one real request; retries per-minute 429s and 5xx."""
+    import openai
+    import app.intent_extractor as extractor
+
+    for attempt in range(1, attempts + 1):
+        try:
+            response = provider.client.chat.completions.create(
+                model=provider.model, tool_choice=provider.tool_choice, **request
+            )
+            return int(response.usage.prompt_tokens)
+        except openai.RateLimitError as exc:
+            if extractor._is_daily_quota(exc):
+                raise _DailyQuotaReached(str(exc)) from exc
+            if attempt == attempts:
+                raise
+            wait = extractor._retry_after_header(exc) or 15.0 * attempt
+            print(f"  per-minute limit; waiting {wait:.0f}s")
+            time.sleep(wait)
+        except (openai.InternalServerError, openai.APIConnectionError) as exc:
+            if attempt == attempts:
+                raise
+            print(f"  {type(exc).__name__}; retrying in {10 * attempt}s")
+            time.sleep(10 * attempt)
+    raise RuntimeError("unreachable")
 
 
 def measure(questions: List[str], context: dict, provider_name: Optional[str], delay: float) -> List[Dict]:
-    import openai
     import app.intent_extractor as extractor
 
     provider = _provider(provider_name)
@@ -125,14 +148,9 @@ def measure(questions: List[str], context: dict, provider_name: Optional[str], d
                 after = _prompt_tokens(provider, extractor.build_extraction_request(question, context, trim=True))
             else:
                 after = before
-        except openai.RateLimitError as exc:
-            if extractor._is_daily_quota(exc):
-                print(f"\nStopped at question {number}: daily quota reached ({len(rows)} measured).")
-                break
-            wait = extractor._retry_after_header(exc) or 10.0
-            print(f"  per-minute limit; waiting {wait:.0f}s")
-            time.sleep(wait)
-            continue
+        except _DailyQuotaReached:
+            print(f"\nStopped at question {number}: daily quota reached ({len(rows)} measured).")
+            break
         rows.append({"question": question, "trimmed": trimmed, "before": before, "after": after})
         print(f"{before:5d} -> {after:5d}  {'trimmed ' if trimmed else 'fallback'}  {question}")
         time.sleep(delay)

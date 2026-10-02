@@ -22,7 +22,7 @@ Per-provider settings
 =========  ==================  ===============  =======================================
 provider   API key             model override   default model
 =========  ==================  ===============  =======================================
-gemini     GEMINI_API_KEY      GEMINI_MODEL     gemini-2.5-flash
+gemini     GEMINI_API_KEY      GEMINI_MODEL     gemini-3.5-flash
 groq       GROQ_API_KEY        GROQ_MODEL       qwen/qwen3.8-27b
 =========  ==================  ===============  =======================================
 """
@@ -64,7 +64,7 @@ class ProviderSpec:
 PROVIDERS: Dict[str, ProviderSpec] = {
     "gemini": ProviderSpec(
         "gemini", "GEMINI_API_KEY", "GEMINI_MODEL",
-        "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash", "auto",
+        "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-3.5-flash", "auto",
     ),
     "groq": ProviderSpec(
         "groq", "GROQ_API_KEY", "GROQ_MODEL",

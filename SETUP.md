@@ -269,7 +269,7 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | yes | Set **all five**. Setting only `DATABASE_URL` is ignored and silently falls back to `localhost:5432` (this caused an outage once). |
 | `GEMINI_API_KEY`, `GROQ_API_KEY` | at least one | Each provider with a key joins the failover chain; a provider without a key is skipped silently. |
 | `LLM_PROVIDER_ORDER` | no | Try order, default `gemini,groq`. Unknown names are ignored. |
-| `GEMINI_MODEL` | no | Default `gemini-2.5-flash`. |
+| `GEMINI_MODEL` | no | Default `gemini-3.5-flash`. (`gemini-2.5-flash` returns 404 "no longer available to new users" for keys created now; `gemini-3.8-flash` was returning 503 "high demand" when checked on 2026-10-02.) |
 | `GROQ_MODEL` | no | Default `qwen/qwen3.8-27b`. Older copies of `.env.example` suggested `llama-3.1-70b-versatile`; make sure a stale value is not set. |
 | `BACKEND_CORS_ORIGINS` | no | Comma-separated; defaults include `http://localhost:5173` and the Vercel URL. |
 | `QUERYMIND_ENABLE_WRITES` | no | `true` allows confirmed natural-language INSERT/UPDATE. **Off by default** - leave it off on a public demo database. |

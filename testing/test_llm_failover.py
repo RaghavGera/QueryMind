@@ -285,7 +285,7 @@ def test_default_order_is_gemini_then_groq():
 def test_default_models_and_overrides(monkeypatch):
     _set_keys(monkeypatch, "gemini", "groq")
     models = {p.name: p.model for p in client_module.configured_providers()}
-    assert models == {"gemini": "gemini-2.5-flash", "groq": "qwen/qwen3.8-27b"}
+    assert models == {"gemini": "gemini-3.5-flash", "groq": "qwen/qwen3.8-27b"}
 
     monkeypatch.setenv("GEMINI_MODEL", "gemini-x")
     monkeypatch.setenv("GROQ_MODEL", "groq-y")

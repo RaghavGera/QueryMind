@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without a payment method (Mistral and Cerebras were dropped because they require one).
   A daily-quota 429 parks the provider and fails over immediately; a per-minute 429 gets one short
   retry; 5xx/timeouts/other 4xx fail over. `/query` returns 429 only when every provider is rate
-  limited. Per-provider model overrides `GEMINI_MODEL`, `GROQ_MODEL`.
+  limited. Per-provider model overrides `GEMINI_MODEL` (default `gemini-3.5-flash`), `GROQ_MODEL`.
   Each served request logs provider, model, `prompt_tokens` and `completion_tokens`.
 - **Per-question schema trimming**: only the tables `EntityRecognizer` finds, plus metric tables and
   foreign-key neighbours, are sent to the LLM; full schema when nothing is recognised. Validation
