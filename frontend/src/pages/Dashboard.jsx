@@ -5,9 +5,10 @@ import QueryInput from "../components/query/QueryInput";
 import SuggestionChips from "../components/query/SuggestionChips";
 import ProcessingTimeline from "../components/query/ProcessingTimeline";
 import ClarificationPanel from "../components/clarification/ClarificationPanel";
+import ConfirmationPanel from "../components/clarification/ConfirmationPanel";
 import SqlPanel from "../components/sql/SqlPanel";
 import ResultsView from "../components/results/ResultsView";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import {
   suggestedQuestions,
   pipelineStagesInitial,
@@ -36,7 +37,11 @@ export default function Dashboard() {
     result,
     executionMs,
     error,
+    warnings,
+    confirmation,
+    writeResult,
     ask,
+    confirm,
     selectClarification,
     reset,
   } = pipeline;
@@ -92,6 +97,23 @@ export default function Dashboard() {
             />
           )}
 
+          {(status === "confirming" || status === "executing") && confirmation && (
+            <ConfirmationPanel
+              confirmation={confirmation}
+              busy={status === "executing"}
+              onConfirm={confirm}
+              onCancel={reset}
+            />
+          )}
+
+          {status === "executed" && writeResult && (
+            <div className="surface-card flex items-center gap-3 p-5 text-sm text-ink">
+              <CheckCircle2 size={18} className="text-state-success" />
+              Done. {writeResult.rows_affected} row
+              {writeResult.rows_affected === 1 ? "" : "s"} changed.
+            </div>
+          )}
+
           {status === "generating" && (
             <ProcessingTimeline
               stages={pipelineStagesAfterClarification}
@@ -108,6 +130,16 @@ export default function Dashboard() {
 
           {status === "done" && sql && (
             <div className="space-y-4">
+              {warnings.length > 0 && (
+                <ul className="surface-card space-y-1 p-4 text-sm text-ink-dim">
+                  {warnings.map((warning) => (
+                    <li key={warning} className="flex items-start gap-2">
+                      <Info size={16} className="mt-0.5 shrink-0" />
+                      {warning}
+                    </li>
+                  ))}
+                </ul>
+              )}
               <SqlPanel sql={sql} onRerun={() => ask(question)} />
               <ResultsView result={result} executionMs={executionMs} />
             </div>

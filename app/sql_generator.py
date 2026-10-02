@@ -44,6 +44,7 @@ from app.ambiguity_detector import (
     resolve_ambiguity,
 )
 from app.models import (
+    Aggregation,
     AggregationType,
     Condition,
     ConditionOperator,
@@ -67,6 +68,14 @@ _EXPRESSION_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-
 # numbers, whitespace, arithmetic operators and parentheses. Anything else
 # (quotes, semicolons, SQL keywords) is rejected.
 _EXPRESSION_SAFE_CHARS = re.compile(r"[\w.\s+\-*/()]+\Z")
+# DATE_TRUNC('month', orders.order_date): the unit is allow-listed and the
+# column is validated against the schema, so nothing else can ride along.
+_DATE_TRUNC = re.compile(
+    r"DATE_TRUNC\(\s*'(day|week|month|quarter|year)'\s*,\s*"
+    r"([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\s*\)\Z",
+    re.IGNORECASE,
+)
+_DATE_TYPES = {"date", "timestamp", "timestamp without time zone", "timestamp with time zone"}
 
 
 # Column types compared case-insensitively. Stored values are often
@@ -367,6 +376,12 @@ class SQLGenerator:
                 raise SQLGenerationError(f"Table '{table}' does not exist in the schema.")
 
         def validate_reference(reference: str, context: str, allow_aggregate: bool = False, allow_expression: bool = False) -> None:
+            date_trunc = _DATE_TRUNC.match(reference.strip())
+            if date_trunc:
+                self._validate_single_identifier(
+                    date_trunc.group(2), context, intent, schema_tables, referenced_tables, unresolved_tables
+                )
+                return
             if allow_aggregate:
                 parts = self._parse_aggregate_expression_parts(reference)
                 if parts:
@@ -413,6 +428,13 @@ class SQLGenerator:
                 "HAVING condition",
                 allow_aggregate=True,
             )
+
+        if intent.comparison:
+            validate_reference(intent.comparison.date_column, "comparison")
+            self._require_date_column(intent.comparison.date_column, intent)
+        if intent.top_n_per_group:
+            for column in intent.top_n_per_group.partition_by:
+                validate_reference(column, "top-N partition")
 
         if intent.query_type in (QueryType.INSERT, QueryType.UPDATE):
             if len(intent.tables) != 1:
@@ -477,7 +499,131 @@ class SQLGenerator:
 
         raise SQLGenerationError(f"Unsupported query type: {intent.query_type}")
 
+    def _require_date_column(self, reference: str, intent: StructuredIntent) -> None:
+        """A comparison cuts periods on a date column; anything else is a mistake."""
+        if "." in reference:
+            table, column = reference.split(".", 1)
+            candidates = [table]
+        else:
+            column = reference
+            candidates = list(intent.tables)
+        types = {
+            self.schema.tables[t].columns[column].data_type.lower()
+            for t in candidates
+            if t in self.schema.tables and column in self.schema.tables[t].columns
+        }
+        if not types or not types <= _DATE_TYPES:
+            raise SQLGenerationError(f"'{reference}' is not a date column, so it cannot define periods.")
+
     def _build_select(self, intent: StructuredIntent) -> Tuple[str, List[Any]]:
+        if intent.comparison:
+            return self._build_comparison(intent)
+        if intent.outer_aggregation:
+            return self._build_nested_aggregate(intent)
+        return self._build_plain_select(intent)
+
+    def _build_nested_aggregate(self, intent: StructuredIntent) -> Tuple[str, List[Any]]:
+        """AVG/MAX/... over a grouped aggregate, e.g. average order value."""
+        if len(intent.aggregations) != 1 or not intent.group_by:
+            raise SQLGenerationError(
+                "A nested aggregate needs exactly one inner aggregate and a grouping "
+                "(for example average of the per-order total)."
+            )
+        inner = intent.model_copy(update={
+            "outer_aggregation": None,
+            "columns": [],
+            "order_by": [],
+            "limit": None,
+            "offset": None,
+            "aggregations": [intent.aggregations[0].model_copy(update={"alias": "agg_value"})],
+        })
+        inner_sql, params = self._build_plain_select(inner)
+        outer = intent.outer_aggregation
+        function = outer.aggregation_type.value
+        alias = outer.alias or f"{function.lower()}_{intent.aggregations[0].aggregation_type.value.lower()}"
+        sql = (
+            f"SELECT {function}({self._quote_ident('inner_query')}.{self._quote_ident('agg_value')}) "
+            f"AS {self._quote_ident(alias)}\nFROM (\n{inner_sql}\n) AS {self._quote_ident('inner_query')}"
+        )
+        return sql, params
+
+    def _build_comparison(self, intent: StructuredIntent) -> Tuple[str, List[Any]]:
+        """
+        Current period vs the previous one, per entity:
+
+            SELECT <entity>, current_value, previous_value, change
+            FROM (current period) cur FULL OUTER JOIN (previous period) prev ON <entity>
+            WHERE change > 0   -- or < 0 / <> 0
+
+        FULL OUTER JOIN + COALESCE so an entity with no activity in one of the
+        periods counts as 0 there rather than silently disappearing.
+        """
+        comparison = intent.comparison
+        if len(intent.aggregations) != 1 or not intent.group_by:
+            raise SQLGenerationError(
+                "A period comparison needs exactly one aggregate and the entity to compare."
+            )
+        entity = list(intent.group_by)
+        for column in intent.columns:
+            if column not in entity:
+                entity.append(column)
+        date_table, date_column = (
+            comparison.date_column.split(".", 1) if "." in comparison.date_column
+            else (None, comparison.date_column)
+        )
+        metric = intent.aggregations[0].model_copy(update={"alias": "metric_value"})
+
+        def period_query(start: str, end: str) -> Tuple[str, List[Any]]:
+            bounds = [
+                Condition(operator=ConditionOperator.GREATER_EQUAL, column=date_column, value=start, table=date_table),
+                Condition(operator=ConditionOperator.LESS_THAN, column=date_column, value=end, table=date_table),
+            ]
+            period = intent.model_copy(update={
+                "comparison": None,
+                "columns": entity,
+                "group_by": entity,
+                "aggregations": [metric],
+                "conditions": list(intent.conditions) + bounds,
+                "order_by": [],
+                "limit": None,
+                "offset": None,
+            })
+            return self._build_plain_select(period)
+
+        current_sql, current_params = period_query(comparison.current_start, comparison.current_end)
+        previous_sql, previous_params = period_query(comparison.previous_start, comparison.previous_end)
+
+        names = [column.split(".")[-1] for column in entity]
+        q = self._quote_ident
+        select = [f"COALESCE({q('cur')}.{q(n)}, {q('prev')}.{q(n)}) AS {q(n)}" for n in names]
+        current_value = f"COALESCE({q('cur')}.{q('metric_value')}, 0)"
+        previous_value = f"COALESCE({q('prev')}.{q('metric_value')}, 0)"
+        delta = f"({current_value} - {previous_value})"
+        select += [
+            f"{current_value} AS {q('current_value')}",
+            f"{previous_value} AS {q('previous_value')}",
+            f"{delta} AS {q('change')}",
+        ]
+        join_on = " AND ".join(f"{q('cur')}.{q(n)} = {q('prev')}.{q(n)}" for n in names)
+
+        where, order = {
+            "increase": (f"{delta} > 0", f"{delta} DESC"),
+            "decrease": (f"{delta} < 0", f"{delta} ASC"),
+            "change": (f"{delta} <> 0", f"ABS({delta}) DESC"),
+        }[comparison.direction]
+
+        sql = (
+            f"SELECT {', '.join(select)}\n"
+            f"FROM (\n{current_sql}\n) AS {q('cur')}\n"
+            f"FULL OUTER JOIN (\n{previous_sql}\n) AS {q('prev')} ON {join_on}\n"
+            f"WHERE {where}\n"
+            f"ORDER BY {order}"
+        )
+        if intent.limit is not None:
+            sql += f"\nLIMIT {int(intent.limit)}"
+        return sql, current_params + previous_params
+
+    def _build_plain_select(self, intent: StructuredIntent) -> Tuple[str, List[Any]]:
         params: List[Any] = []
 
         base_table = self._base_table(intent)
@@ -485,9 +631,26 @@ class SQLGenerator:
 
         select_parts: List[str] = []
         for col in intent.columns:
-            select_parts.append(self._qualify(col))
+            rendered = self._qualify(col)
+            trunc = _DATE_TRUNC.match(col.strip())
+            if trunc:
+                rendered += f" AS {self._quote_ident(trunc.group(1).lower())}"
+            select_parts.append(rendered)
         for agg in intent.aggregations:
             select_parts.append(self._render_aggregation(agg))
+
+        top_n = intent.top_n_per_group
+        if top_n:
+            if not intent.order_by:
+                raise SQLGenerationError("Top-N per group needs an ordering to rank by.")
+            partition = ", ".join(self._qualify(c) for c in top_n.partition_by)
+            ranking = ", ".join(
+                f"{self._render_order_expression(o.column)} {o.direction.value}" for o in intent.order_by
+            )
+            select_parts.append(
+                f"ROW_NUMBER() OVER (PARTITION BY {partition} ORDER BY {ranking}) "
+                f"AS {self._quote_ident('rank_in_group')}"
+            )
 
         if not select_parts:
             select_parts = ["*"]
@@ -519,6 +682,16 @@ class SQLGenerator:
             )
             sql += f"\nHAVING {having_sql}"
             params.extend(having_params)
+
+        if top_n:
+            # Rank inside each group, then keep the first n of every group.
+            partition_names = ", ".join(self._quote_ident(c.split(".")[-1]) for c in top_n.partition_by)
+            sql = (
+                f"SELECT * FROM (\n{sql}\n) AS {self._quote_ident('ranked')}\n"
+                f"WHERE {self._quote_ident('rank_in_group')} <= {int(top_n.n)}\n"
+                f"ORDER BY {partition_names}, {self._quote_ident('rank_in_group')}"
+            )
+            return sql, params
 
         if intent.order_by:
             order_parts = [f"{self._render_order_expression(o.column)} {o.direction.value}" for o in intent.order_by]
@@ -739,6 +912,9 @@ class SQLGenerator:
 
     def _qualify(self, name: str) -> str:
         """Quote a possibly-qualified identifier like 'table.column'."""
+        trunc = _DATE_TRUNC.match(name.strip())
+        if trunc:
+            return f"DATE_TRUNC('{trunc.group(1).lower()}', {self._qualify(trunc.group(2))})"
         if self._parse_aggregate_expression(name):
             raise SQLGenerationError(
                 f"Aggregation expression '{name}' must be represented in aggregations or ORDER BY, not as a column."

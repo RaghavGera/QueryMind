@@ -24,6 +24,8 @@ PYTEST_SUITES = [
     "testing/test_case_insensitive.py",
     "testing/test_converter_rules.py",
     "testing/test_writes.py",
+    "testing/test_analytics.py",
+    "testing/test_provider_config.py",
     "testing/test_eval_harness.py",
 ]
 SCRIPT_SUITES = [

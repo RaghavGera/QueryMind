@@ -10,10 +10,11 @@ from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 import json
 import logging
+import os
 import re
 import random
 import time
-from app.openai_client import get_openai_client
+from app.openai_client import get_model, get_openai_client
 from datetime import date
 
 import openai
@@ -22,7 +23,6 @@ logger = logging.getLogger(__name__)
 
 # Groq's free tier throttles aggressively (429) and occasionally 5xx's. Retry
 # transient failures a few times with exponential backoff before giving up.
-LLM_MODEL = "qwen/qwen3.8-27b"
 LLM_MAX_TOKENS = 800  # Do not raise without re-verifying against Groq limits (429/502).
 LLM_MAX_RETRIES = 3
 LLM_BACKOFF_BASE_SECONDS = 1.0
@@ -107,58 +107,96 @@ class QueryIntent(BaseModel):
     values: Optional[Dict[str, Any]] = Field(
         None, description="Column -> value map for INSERT (new row) or UPDATE (new values)"
     )
+    comparison: Optional[Dict[str, Any]] = Field(
+        None, description="Period-over-period comparison: date_column, grain, direction, period"
+    )
+    top_n_per_group: Optional[Dict[str, Any]] = Field(
+        None, description="Top N rows within each group: partition_by, n"
+    )
 
 
-SYSTEM_PROMPT = """You are an expert at analyzing natural language database queries and extracting structured intent.
-Given a user's question and the database schema, identify:
-- What type of query it is (select, aggregate, count, filter, join, etc.)
-- Which tables and columns are involved
-- Any filtering conditions (WHERE clauses)
-- Aggregation functions needed
-- Grouping and sorting requirements
-- Date handling: resolve relative phrases ("last month", "this quarter", "yesterday") into concrete ISO dates (YYYY-MM-DD) using the current date below. BETWEEN requires a list of exactly two values, e.g. ["2026-08-01", "2026-08-31"]. Never pass a relative phrase as a condition value.
-- Concept mapping: if the question uses a concept with no matching column (e.g. "region" when the schema only has "country"), map it to the closest available column. If no close match exists, do not invent a column.
-- Computed metrics: express metrics like revenue as arithmetic over real columns (e.g. quantity * unit_price). The engine supports arithmetic expressions inside aggregations, so emit them directly, e.g. "SUM(order_items.quantity * order_items.unit_price)".
+# The Groq free tier allows 8,000 tokens/minute, so every token in this prompt
+# costs demo throughput. Keep the base prompt lean; question-specific guidance
+# and function-schema slots are added only when the question needs them.
+SYSTEM_PROMPT = """You extract structured query intent from a natural-language database question, using the schema provided. Use only real tables and columns, qualified as table.column.
 
-Aggregation rules (follow strictly):
-- Whenever you set group_by you MUST also set aggregations. Never return group_by with an empty aggregations list.
-- "top N <things>" / "best-selling <things>" / "most popular <things>" with no metric stated is a ranking by units sold: aggregations ["SUM(order_items.quantity)"], group_by the thing's name column, order_by that aggregation in descending order, and limit N.
-- "top N <things> by <metric>" ranks by that metric (revenue = SUM(order_items.quantity * order_items.unit_price)).
-- Always qualify columns as table.column when more than one table is involved. For a single-table query, qualified names are still preferred.
-- When aggregations are used, put only the non-aggregated dimension columns in "columns"; do not repeat the aggregated column there.
-- A condition on an aggregate ("more than 5 orders", "over 10,000 in revenue") goes in "conditions" with the aggregate expression as the column, e.g. {"column": "COUNT(orders.order_id)", "operator": ">", "value": 5}, together with the matching group_by.
+Rules:
+- Dates: resolve relative phrases ("last month", "this quarter") to ISO dates (YYYY-MM-DD) from the current date given. BETWEEN takes a list of exactly two values, e.g. ["2026-08-01", "2026-08-31"]. Never pass a relative phrase as a value.
+- A concept with no matching column (e.g. "region" when the schema has "country"): use the closest real column; never invent one.
+- Metrics are arithmetic over real columns, e.g. revenue = "SUM(order_items.quantity * order_items.unit_price)".
+- Whenever you set group_by you MUST also set aggregations. Put only non-aggregated dimension columns in "columns".
+- "top N <things>" with no metric ranks by units sold: aggregations ["SUM(order_items.quantity)"], group_by the thing's name column, order_by that aggregation desc, limit N. "top N by <metric>" ranks by that metric.
 
-Examples (query intent arguments only):
+Examples (arguments only):
 Q: What were our top 10 products?
 {"query_type": "aggregate", "tables": ["products", "order_items"], "columns": ["products.product_name"], "aggregations": ["SUM(order_items.quantity)"], "group_by": ["products.product_name"], "order_by": {"column": "SUM(order_items.quantity)", "direction": "desc"}, "limit": 10}
 Q: Which region generated the most revenue?
-{"query_type": "aggregate", "tables": ["customers", "orders", "order_items"], "columns": ["customers.country"], "aggregations": ["SUM(order_items.quantity * order_items.unit_price)"], "group_by": ["customers.country"], "order_by": {"column": "SUM(order_items.quantity * order_items.unit_price)", "direction": "desc"}, "limit": 1}
-Q: How many customers are from each country?
-{"query_type": "aggregate", "tables": ["customers"], "columns": ["customers.country"], "aggregations": ["COUNT(customers.customer_id)"], "group_by": ["customers.country"]}
+{"query_type": "aggregate", "tables": ["customers", "orders", "order_items"], "columns": ["customers.country"], "aggregations": ["SUM(order_items.quantity * order_items.unit_price)"], "group_by": ["customers.country"], "order_by": {"column": "SUM(order_items.quantity * order_items.unit_price)", "direction": "desc"}, "limit": 1}"""
+
+HAVING_GUIDANCE = """
+A condition on an aggregate ("more than 5 orders", "over 10,000 in revenue") goes in "conditions" with the aggregate expression as the column, plus the matching group_by:
 Q: Which customers have placed more than 5 orders?
 {"query_type": "aggregate", "tables": ["customers", "orders"], "columns": ["customers.first_name", "customers.last_name"], "aggregations": ["COUNT(orders.order_id)"], "group_by": ["customers.customer_id", "customers.first_name", "customers.last_name"], "conditions": [{"column": "COUNT(orders.order_id)", "operator": ">", "value": 5}]}
-Q: Show customers from India.
-{"query_type": "select", "tables": ["customers"], "columns": ["customers.first_name", "customers.last_name", "customers.country"], "conditions": [{"column": "country", "operator": "=", "value": "India", "table": "customers"}]}
+"""
 
-Use the provided schema to ensure table and column names are valid."""
-
-
-# Sections appended only when the question needs them: every extra token is
-# paid on every request, and the Groq free tier throttles on tokens.
+# Sections appended only when the question needs them.
 WRITE_GUIDANCE = """
 Writes (insert / update):
 - "add / create / insert a new <row>" -> query_type "insert", tables [the one table], values {bare column: value} using ONLY values the user stated. Never invent values; omit anything not stated.
-- "change / update / set / rename / increase ..." -> query_type "update", tables [the one table], values {column: new value}, and conditions that identify exactly which rows to change.
+- "change / update / set / rename ..." -> query_type "update", tables [the one table], values {column: new value}, and conditions that identify exactly which rows to change.
 - "delete / remove" -> query_type "delete" with conditions identifying the rows.
-Examples:
 Q: Add a new product called Wireless Mouse in the Accessories category priced at 19.99
 {"query_type": "insert", "tables": ["products"], "values": {"product_name": "Wireless Mouse", "category": "Accessories", "price": 19.99}}
 Q: Change the price of Laptop 1 to 999
 {"query_type": "update", "tables": ["products"], "values": {"price": 999}, "conditions": [{"column": "product_name", "operator": "=", "value": "Laptop 1", "table": "products"}]}
 """
 
-_WRITE_WORDS = re.compile(
-    r"\b(add|insert|create|update|change|set|rename|delete|remove)\b",
+COMPARISON_GUIDANCE = """
+Period comparison ("increased / decreased / grew / dropped this quarter|month|year", "compared to last month"):
+- Set "comparison" to {"date_column": "<table.column>", "grain": "month|quarter|year", "direction": "increase|decrease|change", "period": "this|last"}. Do NOT compute dates yourself.
+- Put the metric in "aggregations" (exactly one), the entities being compared in "columns" and "group_by". Do not add date conditions for the compared periods.
+Q: Show customers whose spending increased this quarter
+{"query_type": "aggregate", "tables": ["customers", "orders", "order_items"], "columns": ["customers.customer_id", "customers.first_name", "customers.last_name"], "aggregations": ["SUM(order_items.quantity * order_items.unit_price)"], "group_by": ["customers.customer_id", "customers.first_name", "customers.last_name"], "comparison": {"date_column": "orders.order_date", "grain": "quarter", "direction": "increase", "period": "this"}}
+"""
+
+PER_GROUP_GUIDANCE = """
+Top N per group ("top 5 products by revenue in each category"):
+- Set "top_n_per_group" to {"partition_by": ["<table.column of the group>"], "n": N}, with the metric in "aggregations", the entity in "columns" and "group_by", and "order_by" on the metric (descending). Do not set "limit".
+Q: What were the top 5 products by revenue in each category?
+{"query_type": "aggregate", "tables": ["products", "order_items"], "columns": ["products.category", "products.product_name"], "aggregations": ["SUM(order_items.quantity * order_items.unit_price)"], "group_by": ["products.category", "products.product_name"], "order_by": {"column": "SUM(order_items.quantity * order_items.unit_price)", "direction": "desc"}, "top_n_per_group": {"partition_by": ["products.category"], "n": 5}}
+"""
+
+NESTED_GUIDANCE = """
+Average/maximum of a per-entity total ("average order value", "average spending per customer"):
+- Nest the aggregates: aggregations ["AVG(SUM(<expr>))"] and group_by the entity the inner total is computed for (order -> orders.order_id, customer -> customers.customer_id).
+Q: What is the average order value?
+{"query_type": "aggregate", "tables": ["orders", "order_items"], "aggregations": ["AVG(SUM(order_items.quantity * order_items.unit_price))"], "group_by": ["orders.order_id"]}
+"""
+
+TIME_GROUPING_GUIDANCE = """
+Time grouping ("monthly revenue", "orders per month"):
+- Use DATE_TRUNC('<day|week|month|quarter|year>', <table.column>) as a column AND in group_by. Never use strftime, MONTH(), EXTRACT or to_char.
+Q: Show monthly revenue
+{"query_type": "aggregate", "tables": ["orders", "order_items"], "columns": ["DATE_TRUNC('month', orders.order_date)"], "aggregations": ["SUM(order_items.quantity * order_items.unit_price)"], "group_by": ["DATE_TRUNC('month', orders.order_date)"], "order_by": {"column": "DATE_TRUNC('month', orders.order_date)", "direction": "asc"}}
+"""
+
+_WRITE_WORDS = re.compile(r"\b(add|insert|create|update|change|set|rename|delete|remove)\b", re.IGNORECASE)
+_COMPARISON_WORDS = re.compile(
+    r"\b(increased?|decreased?|grew|grown|growth|dropped|declined?|rose|fell|compared|versus|vs)\b",
+    re.IGNORECASE,
+)
+_PER_GROUP_WORDS = re.compile(r"\b(each|every|per)\b", re.IGNORECASE)
+_RANKING_WORDS = re.compile(r"\b(top|best|highest)\b", re.IGNORECASE)
+_NESTED_WORDS = re.compile(
+    r"\baverage\s+(order\s+value|[a-z ]*\bper\b)|\baverage\s+\w+\s+(value|total)\b", re.IGNORECASE
+)
+_TIME_GROUP_WORDS = re.compile(
+    r"\b(monthly|weekly|daily|quarterly|yearly|annual(ly)?|per\s+(day|week|month|quarter|year)|"
+    r"by\s+(day|week|month|quarter|year)|each\s+(day|week|month|quarter|year))\b",
+    re.IGNORECASE,
+)
+_HAVING_WORDS = re.compile(
+    r"\b(more|less|fewer|greater)\s+than\b|\bover\b|\bat\s+least\b|\bat\s+most\b|\bexceed\w*\b",
     re.IGNORECASE,
 )
 
@@ -166,143 +204,126 @@ _WRITE_WORDS = re.compile(
 def build_system_prompt(question: str) -> str:
     """The base prompt plus whichever optional guidance this question needs."""
     prompt = SYSTEM_PROMPT
+    if _HAVING_WORDS.search(question):
+        prompt += "\n" + HAVING_GUIDANCE
     if _WRITE_WORDS.search(question):
         prompt += "\n" + WRITE_GUIDANCE
+    if _COMPARISON_WORDS.search(question):
+        prompt += "\n" + COMPARISON_GUIDANCE
+    if _PER_GROUP_WORDS.search(question) and _RANKING_WORDS.search(question):
+        prompt += "\n" + PER_GROUP_GUIDANCE
+    if _NESTED_WORDS.search(question):
+        prompt += "\n" + NESTED_GUIDANCE
+    if _TIME_GROUP_WORDS.search(question):
+        prompt += "\n" + TIME_GROUPING_GUIDANCE
     return prompt
+
+
+def build_function_schema(question: str) -> dict:
+    """
+    The extraction function schema. Slots for writes, comparisons and per-group
+    ranking are only advertised for questions that can use them.
+    """
+    properties = {
+        "query_type": {
+            "type": "string",
+            "enum": ["select", "aggregate", "count", "filter", "join", "insert", "update", "delete"],
+        },
+        "tables": {"type": "array", "items": {"type": "string"}},
+        "columns": {"type": "array", "items": {"type": "string"}},
+        "conditions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "column": {"type": "string"},
+                    "operator": {"type": "string"},
+                    # No "type": JSON-schema type unions are rejected by some providers.
+                    "value": {"description": "A string, number, boolean or null; a list of exactly two values for BETWEEN"},
+                },
+            },
+            "description": "WHERE conditions (or conditions on an aggregate expression)",
+        },
+        "aggregations": {"type": "array", "items": {"type": "string"},
+                         "description": "e.g. COUNT(t.col), SUM(t.a * t.b)"},
+        "group_by": {"type": "array", "items": {"type": "string"}},
+        "order_by": {
+            "type": "object",
+            "properties": {"column": {"type": "string"}, "direction": {"type": "string", "enum": ["asc", "desc"]}},
+        },
+        "limit": {"type": "integer"},
+    }
+    if _WRITE_WORDS.search(question):
+        properties["values"] = {
+            "type": "object",
+            "additionalProperties": True,
+            "description": "insert/update only: bare column name -> value. Only values the user stated.",
+        }
+    if _COMPARISON_WORDS.search(question):
+        properties["comparison"] = {
+            "type": "object",
+            "description": "Metric compared between two periods. Keys: date_column, grain (month|quarter|year), direction (increase|decrease|change), period (this|last).",
+        }
+    if _PER_GROUP_WORDS.search(question) and _RANKING_WORDS.search(question):
+        properties["top_n_per_group"] = {
+            "type": "object",
+            "description": "Top N within each group. Keys: partition_by (list of table.column), n (integer).",
+        }
+    return {
+        "name": "extract_query_intent",
+        "description": "Extract structured intent from a natural language database query",
+        "parameters": {"type": "object", "properties": properties, "required": ["query_type", "tables"]},
+    }
 
 
 def extract_intent(question: str, schema_context: dict) -> QueryIntent:
     """
     Extract structured query intent from a natural language question.
 
-    This function uses OpenAI's API with function calling to analyze a user's question
-    and extract structured information about what database query they want to perform.
-    The schema context helps the model identify valid tables and columns.
+    Uses function calling so the model returns arguments matching
+    ``build_function_schema``. Transient provider failures (429/5xx/connection)
+    are retried with backoff; anything unrecoverable raises
+    ``IntentExtractionError`` carrying a ``kind`` the API layer maps to an
+    HTTP status.
 
     Args:
         question: The natural language question from the user
-        schema_context: Dictionary containing database schema information including
-                       tables, columns, and relationships
+        schema_context: tables, columns and relationships (see ``app.main._schema_context``)
 
     Returns:
         QueryIntent: A structured representation of the query intent
 
     Raises:
-        Exception: If the OpenAI API call fails or returns invalid data
-
-    Example:
-        >>> schema = {
-        ...     "tables": ["customers", "orders"],
-        ...     "columns": {"customers": ["id", "name", "email"], "orders": ["id", "customer_id", "total"]}
-        ... }
-        >>> intent = extract_intent("Show me all customers who ordered more than $100", schema)
-        >>> print(intent.query_type)
-        'filter'
+        IntentExtractionError: If the LLM call fails or returns unusable data
     """
     client = get_openai_client()
 
-    # Prepare the schema information for the prompt
-    schema_description = _format_schema_context(schema_context)
-
-    # Define the function schema for structured output
-    function_schema = {
-        "name": "extract_query_intent",
-        "description": "Extract structured intent from a natural language database query",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query_type": {
-                    "type": "string",
-                    "enum": ["select", "aggregate", "count", "filter", "join", "insert", "update", "delete"],
-                    "description": "The primary type of database operation"
-                },
-                "tables": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of table names involved in the query"
-                },
-                "columns": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "List of columns to retrieve or filter on"
-                },
-                "conditions": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "column": {"type": "string"},
-                            "operator": {"type": "string"},
-                            "value": {"type": ["string", "number", "boolean", "null", "array"],
-                                      "description": "Single value, or a list of exactly two values when operator is BETWEEN"}
-                        }
-                    },
-                    "description": "WHERE clause conditions"
-                },
-                "aggregations": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Aggregation functions like COUNT, SUM, AVG, MAX, MIN"
-                },
-                "group_by": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Columns to group results by"
-                },
-                "order_by": {
-                    "type": "object",
-                    "properties": {
-                        "column": {"type": "string"},
-                        "direction": {"type": "string", "enum": ["asc", "desc"]}
-                    },
-                    "description": "Sorting specification"
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of rows to return"
-                },
-                "values": {
-                    "type": "object",
-                    "additionalProperties": True,
-                    "description": "For insert/update only: map of bare column name -> value to write. Only values the user actually stated."
-                }
-            },
-            "required": ["query_type", "tables"]
-        }
-    }
-
     user_prompt = f"""Database Schema:
-{schema_description}
+{_format_schema_context(schema_context)}
 Current date: {date.today().isoformat()}
-User Question: {question}
-
-Extract the structured query intent from this question."""
+User Question: {question}"""
 
     try:
         # Call API with function calling (supports both Groq and OpenAI)
         response = _create_completion_with_retry(
             client,
-            model=LLM_MODEL,
+            model=get_model(),
             messages=[
                 {"role": "system", "content": build_system_prompt(question)},
-                {"role": "user", "content": user_prompt}
+                {"role": "user", "content": user_prompt},
             ],
-            functions=[function_schema],
-            function_call={"name": "extract_query_intent"},
+            tools=[{"type": "function", "function": build_function_schema(question)}],
+            tool_choice="required",  # one tool, so "required" forces it; portable across providers
             temperature=0.1,  # Low temperature for more deterministic outputs
-            max_tokens=LLM_MAX_TOKENS
+            max_tokens=LLM_MAX_TOKENS,
         )
 
-        # Extract the function call response
         message = response.choices[0].message
 
-        if not message.function_call:
-            raise IntentExtractionError("Error extracting intent: No function call in response")
+        if not getattr(message, "tool_calls", None):
+            raise IntentExtractionError("Error extracting intent: No tool call in response")
 
-        # Parse the function arguments
-        intent_data = json.loads(message.function_call.arguments)
-
-        # Create and return QueryIntent object
+        intent_data = json.loads(message.tool_calls[0].function.arguments)
         return QueryIntent(**intent_data)
 
     except IntentExtractionError:
@@ -315,34 +336,23 @@ Extract the structured query intent from this question."""
 
 def _format_schema_context(schema_context: dict) -> str:
     """
-    Format the schema context into a readable string for the prompt.
-
-    Args:
-        schema_context: Dictionary containing schema information
-
-    Returns:
-        str: Formatted schema description
+    Compact schema listing for the prompt: one line per table plus the foreign
+    keys, e.g. ``orders(order_id, customer_id, order_date, status)``.
     """
-    formatted = []
+    lines = []
 
-    if "tables" in schema_context:
-        formatted.append("Tables:")
-        for table in schema_context["tables"]:
-            formatted.append(f"  - {table}")
+    columns = schema_context.get("columns")
+    if columns:
+        for table, table_columns in columns.items():
+            lines.append(f"{table}({', '.join(table_columns)})")
+    elif "tables" in schema_context:
+        lines.extend(schema_context["tables"])
 
-    if "columns" in schema_context:
-        formatted.append("\nColumns by Table:")
-        for table, columns in schema_context["columns"].items():
-            formatted.append(f"  {table}:")
-            for column in columns:
-                formatted.append(f"    - {column}")
+    relationships = schema_context.get("relationships")
+    if relationships:
+        lines.append("Foreign keys: " + "; ".join(relationships))
 
-    if "relationships" in schema_context:
-        formatted.append("\nRelationships:")
-        for rel in schema_context["relationships"]:
-            formatted.append(f"  - {rel}")
-
-    return "\n".join(formatted)
+    return "\n".join(lines)
 
 
 def validate_intent_against_schema(intent: QueryIntent, schema_context: dict) -> tuple[bool, List[str]]:

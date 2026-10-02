@@ -55,8 +55,8 @@ class _FakeCompletions:
         self.calls += 1
         if self.errors:
             raise self.errors.pop(0)
-        function_call = type("FC", (), {"arguments": self.arguments})()
-        message = type("M", (), {"function_call": function_call})()
+        call = type("TC", (), {"function": type("F", (), {"arguments": self.arguments})()})()
+        message = type("M", (), {"tool_calls": [call]})()
         return type("R", (), {"choices": [type("C", (), {"message": message})()]})()
 
 
@@ -75,6 +75,7 @@ def sleeps(monkeypatch):
 
 def _use_client(monkeypatch, completions):
     monkeypatch.setattr(extractor, "get_openai_client", lambda: _FakeClient(completions))
+    monkeypatch.setattr(extractor, "get_model", lambda: "test-model")
 
 
 SCHEMA_CONTEXT = {"tables": ["customers"], "columns": {"customers": ["customer_id"]}}
@@ -374,3 +375,81 @@ def test_ranking_without_an_unambiguous_metric_still_asks_for_clarification(sche
     _, result = _generate(schema, intent, "Show me the top 10 customers")
 
     assert result.status == GenerationStatus.NEEDS_CLARIFICATION
+
+
+# ---------------------------------------------------------------------- #
+# Prompt budget: Groq's free tier is 8,000 tokens/minute, so prompt size is
+# demo throughput. Guidance and function-schema slots are per question.
+# ---------------------------------------------------------------------- #
+
+def _prompt_tokens(question):
+    ctx = {
+        "tables": ["customers"],
+        "columns": {"customers": ["customer_id", "first_name"]},
+        "relationships": [],
+    }
+    chars = (
+        len(extractor.build_system_prompt(question))
+        + len(json.dumps(extractor.build_function_schema(question)))
+        + len(extractor._format_schema_context(ctx))
+        + len(question)
+    )
+    return chars // 4
+
+
+def test_plain_questions_get_the_lean_prompt():
+    plain = extractor.build_system_prompt("Show all customers")
+    for marker in ("Writes (insert", "Period comparison", "Top N per group", "Time grouping", "Average/maximum"):
+        assert marker not in plain
+    assert _prompt_tokens("Show all customers") < 1000
+
+    slots = extractor.build_function_schema("Show all customers")["parameters"]["properties"]
+    assert not {"values", "comparison", "top_n_per_group"} & set(slots)
+
+
+@pytest.mark.parametrize("question,marker,slot", [
+    ("Change the price of Laptop 1 to 999", "Writes (insert", "values"),
+    ("Show customers whose spending increased this quarter", "Period comparison", "comparison"),
+    ("Top 5 products by revenue in each category", "Top N per group", "top_n_per_group"),
+])
+def test_specialised_guidance_and_slots_appear_only_when_needed(question, marker, slot):
+    assert marker in extractor.build_system_prompt(question)
+    assert slot in extractor.build_function_schema(question)["parameters"]["properties"]
+
+
+@pytest.mark.parametrize("question,marker", [
+    ("What is the average order value?", "Average/maximum"),
+    ("Show monthly revenue", "Time grouping"),
+    ("Which customers have placed more than 5 orders?", "condition on an aggregate"),
+])
+def test_other_guidance_sections_are_routed(question, marker):
+    assert marker in extractor.build_system_prompt(question)
+
+
+def test_schema_listing_is_compact():
+    ctx = {
+        "tables": ["orders"],
+        "columns": {"orders": ["order_id", "status"]},
+        "relationships": ["orders.customer_id -> customers.customer_id"],
+    }
+    assert extractor._format_schema_context(ctx) == (
+        "orders(order_id, status)\nForeign keys: orders.customer_id -> customers.customer_id"
+    )
+
+
+def test_request_uses_the_portable_tools_api(monkeypatch, sleeps):
+    seen = {}
+
+    class Recording(_FakeCompletions):
+        def create(self, **kwargs):
+            seen.update(kwargs)
+            return super().create(**kwargs)
+
+    _use_client(monkeypatch, Recording())
+    extractor.extract_intent("show customers", SCHEMA_CONTEXT)
+
+    assert seen["tool_choice"] == "required"
+    assert seen["tools"][0]["type"] == "function"
+    assert seen["tools"][0]["function"]["name"] == "extract_query_intent"
+    assert "functions" not in seen and "function_call" not in seen  # legacy API unsupported by some providers
+    assert seen["model"] == "test-model" and seen["max_tokens"] == 800

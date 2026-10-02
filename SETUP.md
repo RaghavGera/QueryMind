@@ -252,3 +252,78 @@ Phase 2 will add:
 - Intent extraction using OpenAI
 - Entity recognition (table/column identification)
 - Structured intent representation
+
+---
+
+# Current setup (backend, frontend, deployment, tests)
+
+The sections above are the original Phase 1 database walkthrough. This section
+is the up-to-date reference.
+
+## Environment variables
+
+Backend (`.env` locally; the service's Environment screen on Render):
+
+| Variable | Required | Notes |
+|---|---|---|
+| `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | yes | Set **all five**. Setting only `DATABASE_URL` is ignored and silently falls back to `localhost:5432` (this caused an outage once). |
+| `GROQ_API_KEY` / `MISTRAL_API_KEY` / `GEMINI_API_KEY` / `OPENAI_API_KEY` | one of them | The provider is inferred from whichever key is set. |
+| `LLM_PROVIDER` | no | `groq` (default if only `GROQ_API_KEY` is set), `mistral`, `gemini` or `openai`. |
+| `QUERYMIND_LLM_MODEL` | no (required for `gemini`) | Overrides the provider's default model. |
+| `BACKEND_CORS_ORIGINS` | no | Comma-separated; defaults include `http://localhost:5173` and the Vercel URL. |
+| `QUERYMIND_ENABLE_WRITES` | no | `true` allows confirmed natural-language INSERT/UPDATE. **Off by default** - leave it off on a public demo database. |
+| `QUERYMIND_CONFIRM_SECRET` | with writes | Long random string; keeps confirmation tokens valid across restarts/instances. |
+
+Frontend (Vercel project settings): `VITE_API_BASE_URL` = the backend URL.
+The Vercel project's **Root Directory must be `frontend/`** so `frontend/vercel.json`
+(the SPA rewrite for `/app`, `/architecture`, `/developers`) takes effect.
+
+## LLM provider and rate limits
+
+All LLM calls go through `app/openai_client.py` (OpenAI-compatible protocol, using
+the standard `tools` / `tool_choice` API). `max_tokens` is pinned at 800.
+Groq's free tier for the current key is 8,000 tokens/minute and 1,000
+requests/day, so the extractor keeps its prompt small (about 830 tokens for a typical
+question) and retries 429/5xx with backoff. After switching provider, run the
+eval harness (below) before trusting it: `python -m testing.eval_harness --offline`.
+
+## Running locally
+
+```bash
+pip install -r requirements.txt
+uvicorn app.main:app --reload          # backend on :8000
+cd frontend && npm install && npm run dev   # frontend on :5173
+```
+
+## Tests
+
+```bash
+pip install pytest
+python -m testing.run_tests            # every offline suite (no DB, no network)
+python -m testing.run_tests --live     # also test_phase1/2 (need a DB / API key)
+```
+
+The files in `testing/` mix pytest files and standalone scripts, so use the
+runner rather than `pytest testing/`.
+
+## Eval harness
+
+```bash
+python -m testing.eval_harness                           # live Render backend
+python -m testing.eval_harness --base-url http://localhost:8000
+python -m testing.eval_harness --offline                 # real LLM, in-memory schema, no DB
+python -m testing.eval_harness --only q2-top-10-products --runs 5   # measure variance
+```
+
+Questions and expectations live in `testing/eval_questions.json`. Exit code is
+non-zero if any `core` question fails; `known_gap` questions are reported only.
+Throttling/outages are reported as INFRA, not as pipeline failures.
+
+## Natural-language writes (INSERT / UPDATE)
+
+`POST /query` never writes. For a write it returns `status: "needs_confirmation"`,
+a `preview` (with the affected-row count for UPDATEs) and a `confirmation_token`
+(signed, single-use, 5 minutes). `POST /query/confirm {"confirmation_token": "..."}`
+then executes exactly that statement and rolls back if the affected row count
+changed. With `QUERYMIND_ENABLE_WRITES` unset the preview is returned with
+`status: "blocked"` and nothing can be confirmed. Natural-language DELETE is refused.

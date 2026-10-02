@@ -53,12 +53,14 @@
   {
     "id": "q4-spending-increased-this-quarter",
     "question": "Show customers whose spending increased this quarter",
-    "tier": "known_gap",
-    "notes": "Plan sample Q4. Period-over-period comparison -- Phase 2 feature gap. Currently needs_clarification.",
+    "tier": "core",
+    "notes": "Plan sample Q4. Period-over-period (this vs previous quarter), per customer.",
     "expect": {
       "sql_all": [
+        "full outer join",
         "sum(",
-        "customers"
+        "current_value",
+        "previous_value"
       ],
       "rows": "any"
     }
@@ -450,10 +452,10 @@
     }
   },
   {
-    "id": "gap-having-orders-over-5",
+    "id": "l7-customers-more-than-5-orders",
     "question": "Which customers have placed more than 5 orders?",
-    "tier": "known_gap",
-    "notes": "Needs HAVING on an aggregate; QueryIntent has no HAVING slot yet.",
+    "tier": "core",
+    "notes": "Aggregate condition -> HAVING.",
     "expect": {
       "sql_all": [
         "count(",
@@ -465,9 +467,9 @@
     }
   },
   {
-    "id": "gap-never-ordered",
+    "id": "l7-customers-never-ordered",
     "question": "Find customers who have never placed an order.",
-    "tier": "known_gap",
+    "tier": "core",
     "notes": "Anti-join: customers 451-500 have no orders in the seed data (50 rows). Needs LEFT JOIN ... IS NULL.",
     "expect": {
       "sql_all": [
@@ -480,14 +482,14 @@
     }
   },
   {
-    "id": "gap-monthly-revenue",
+    "id": "l6-monthly-revenue",
     "question": "Show monthly revenue from orders.",
-    "tier": "known_gap",
-    "notes": "Needs date bucketing (date_trunc); not supported by the generator.",
+    "tier": "core",
+    "notes": "Date bucketing via DATE_TRUNC.",
     "expect": {
       "sql_all": [
-        "sum(",
-        "month"
+        "date_trunc('month'",
+        "sum("
       ],
       "rows": {
         "min": 1
@@ -495,17 +497,75 @@
     }
   },
   {
-    "id": "gap-average-order-value",
+    "id": "l6-average-order-value",
     "question": "What is the average order value?",
-    "tier": "known_gap",
-    "notes": "Needs a nested aggregate (AVG over per-order SUM).",
+    "tier": "core",
+    "notes": "Nested aggregate: AVG over the per-order SUM.",
     "expect": {
       "sql_all": [
-        "avg("
+        "avg(",
+        "agg_value",
+        "group by"
       ],
       "rows": {
         "count": 1
       }
+    }
+  },
+  {
+    "id": "l7-top5-products-per-category",
+    "question": "What were the top 5 products by revenue in each category?",
+    "tier": "core",
+    "notes": "Top-N per group via ROW_NUMBER(); 5 categories x 5 products.",
+    "expect": {
+      "sql_all": [
+        "row_number()",
+        "partition by",
+        "sum("
+      ],
+      "rows": {
+        "count": 25
+      }
+    }
+  },
+  {
+    "id": "l7-average-spending-per-customer",
+    "question": "What is the average spending per customer?",
+    "tier": "core",
+    "notes": "Nested aggregate: AVG over each customer's total.",
+    "expect": {
+      "sql_all": [
+        "avg(",
+        "group by"
+      ],
+      "rows": {
+        "count": 1
+      }
+    }
+  },
+  {
+    "id": "write-update-preview",
+    "question": "Change the price of Laptop 1 to 999",
+    "tier": "core",
+    "notes": "Writes are never executed by /query: expect a preview (blocked when writes are disabled, needs_confirmation when enabled).",
+    "expect": {
+      "status": [
+        "blocked",
+        "needs_confirmation"
+      ],
+      "preview_action": "update"
+    }
+  },
+  {
+    "id": "write-insert-preview",
+    "question": "Add a new product called Wireless Mouse in the Accessories category priced at 19.99",
+    "tier": "core",
+    "expect": {
+      "status": [
+        "blocked",
+        "needs_confirmation"
+      ],
+      "preview_action": "insert"
     }
   }
 ]

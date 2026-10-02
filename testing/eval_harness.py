@@ -121,6 +121,9 @@ def check_response(
         # A refusal must never come with SQL that ran.
         if status != "success" and body.get("result", {}).get("rows"):
             failures.append("a non-success response still returned rows")
+        wanted_action = expect.get("preview_action")
+        if wanted_action and (body.get("preview") or {}).get("action") != wanted_action:
+            failures.append(f"expected a {wanted_action} preview, got {body.get('preview')!r}")
         return failures
 
     sql = body.get("sql")

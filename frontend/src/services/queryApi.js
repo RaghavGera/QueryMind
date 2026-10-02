@@ -57,3 +57,10 @@ export async function submitQuestion(question, clarificationContext = "") {
     }),
   });
 }
+
+export async function confirmWrite(confirmationToken) {
+  return request("/query/confirm", {
+    method: "POST",
+    body: JSON.stringify({ confirmation_token: confirmationToken }),
+  });
+}

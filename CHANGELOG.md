@@ -24,6 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly that statement and rolls back if the affected row count changed. Writes are
   disabled unless `QUERYMIND_ENABLE_WRITES=true` (see SETUP.md); `QUERYMIND_CONFIRM_SECRET`
   keeps tokens valid across restarts. NL `DELETE` is refused.
+- **Period-over-period comparison** ("customers whose spending increased this quarter"):
+  current vs previous month/quarter/year via two aggregated subqueries on a FULL OUTER JOIN
+  (an entity with no activity in one period counts as 0). Period bounds come from today's date,
+  not the LLM; an in-progress period is flagged in `warnings`.
+- **Top-N per group** (`ROW_NUMBER() OVER (PARTITION BY ...)`), **nested aggregates**
+  ("average order value" = AVG of per-order SUM) and **date bucketing** (`DATE_TRUNC`,
+  allow-listed units, schema-validated column).
+- Frontend: confirmation panel for writes (preview, Confirm/Cancel), backend `warnings` /
+  assumptions shown to the user, `blocked` responses without questions shown as messages.
+- Provider-agnostic LLM client (`LLM_PROVIDER`: groq, mistral, gemini, openai; Groq remains the
+  default) using the standard `tools` / `tool_choice` API; `QUERYMIND_LLM_MODEL` override.
 - Required-column check for INSERT: missing NOT NULL values become clarification questions.
 - `docs/KNOWN_ISSUES.md`: observed behaviour per question, owner actions, open gaps.
 
@@ -32,8 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Retry-After`); failures map to honest HTTP statuses (429 / 503 / 502) with a structured
   body instead of a traceback. `max_tokens` stays pinned at 800.
 - `/query` never returns a traceback: any unexpected error is a structured 500.
-- Extractor prompt is pinned in a module constant, carries few-shot examples and
-  aggregation rules, and appends write guidance only for write-like questions.
+- Extractor prompt is pinned in a module constant with two few-shot examples; guidance and
+  function-schema slots for writes, comparisons, per-group ranking, nested aggregates, time
+  grouping and HAVING are added only for questions that need them, and the schema listing is
+  compact (~830 tokens for a typical question). Groq's free tier is 8,000 tokens/minute.
 - Text comparisons (`=`, `!=`, `IN`, `LIKE`) on text columns are case-insensitive.
 - `execute_query` debug-file write on every request replaced by `logging`.
 

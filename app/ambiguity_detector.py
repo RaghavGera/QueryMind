@@ -168,6 +168,7 @@ class AmbiguityDetector:
         ambiguities.extend(self._check_time_references(intent))
         ambiguities.extend(self._check_join_paths(intent))
         ambiguities.extend(self._check_vague_terms(intent))
+        ambiguities.extend(self._check_converter_clarifications(intent))
 
         # Count severity levels
         critical_count = sum(1 for a in ambiguities if a.severity == SeverityLevel.CRITICAL)
@@ -354,7 +355,7 @@ class AmbiguityDetector:
         ambiguities = []
 
         # If limit is specified but no order_by
-        if intent.limit and not intent.order_by:
+        if intent.limit and not intent.order_by and not intent.comparison:
             # Check if query mentions "top", "best", "highest", etc.
             keywords = ["top", "best", "highest", "lowest", "first", "last"]
             if any(keyword in intent.original_question.lower() for keyword in keywords):
@@ -382,8 +383,8 @@ class AmbiguityDetector:
 
         for keyword in time_keywords:
             if keyword in question_lower:
-                # Check if there's a date condition
-                has_date_condition = any(
+                # A period comparison carries its own date column.
+                has_date_condition = bool(intent.comparison) or any(
                     cond.column in self._find_date_columns(intent.tables)
                     for cond in intent.conditions
                 )
@@ -403,6 +404,19 @@ class AmbiguityDetector:
                     ))
 
         return ambiguities
+
+    def _check_converter_clarifications(self, intent: StructuredIntent) -> List[Ambiguity]:
+        """Questions the converter could not resolve itself (e.g. which period to compare)."""
+        return [
+            Ambiguity(
+                ambiguity_type=AmbiguityType.UNCLEAR_GROUPING,
+                severity=SeverityLevel.HIGH,
+                description="The question needs one more detail before SQL can be written",
+                clarification_question=question,
+                context={"source": "converter"},
+            )
+            for question in intent.recognized_entities.get("clarifications", [])
+        ]
 
     def _check_vague_terms(self, intent: StructuredIntent) -> List[Ambiguity]:
         """

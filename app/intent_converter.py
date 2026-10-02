@@ -18,6 +18,7 @@ could be wrong.
 """
 
 import re
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 from pydantic import ValidationError
@@ -32,8 +33,10 @@ from app.models import (
     JoinType,
     OrderBy,
     OrderDirection,
+    PeriodComparison,
     QueryType,
     StructuredIntent,
+    TopNPerGroup,
 )
 from app.schema import DatabaseSchema
 from app.vague_terms import DEFAULTABLE_RANKING, needs_ranking_metric
@@ -323,6 +326,84 @@ def _apply_anti_join(
     return rewritten
 
 
+# AVG(SUM(order_items.quantity * order_items.unit_price)) -> outer AVG over inner SUM
+_NESTED_AGGREGATION = re.compile(
+    r"^(COUNT|SUM|AVG|MIN|MAX)\s*\(\s*((?:COUNT|SUM|AVG|MIN|MAX)\s*\(.*\))\s*\)$",
+    re.IGNORECASE,
+)
+_DATE_TRUNC_EXPRESSION = re.compile(
+    r"^DATE_TRUNC\(\s*'[a-z]+'\s*,\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\s*\)$",
+    re.IGNORECASE,
+)
+
+
+def period_bounds(grain: str, offset: int, today: date) -> tuple:
+    """
+    Half-open [start, end) bounds of the calendar month/quarter/year that is
+    ``offset`` periods from the one containing ``today`` (0 = this period,
+    -1 = the previous one).
+    """
+    if grain == "month":
+        index = today.year * 12 + (today.month - 1) + offset
+        start = date(index // 12, index % 12 + 1, 1)
+        end_index = index + 1
+        end = date(end_index // 12, end_index % 12 + 1, 1)
+    elif grain == "quarter":
+        quarter = (today.year * 4 + (today.month - 1) // 3) + offset
+        start = date(quarter // 4, (quarter % 4) * 3 + 1, 1)
+        end_quarter = quarter + 1
+        end = date(end_quarter // 4, (end_quarter % 4) * 3 + 1, 1)
+    elif grain == "year":
+        start = date(today.year + offset, 1, 1)
+        end = date(today.year + offset + 1, 1, 1)
+    else:
+        raise IntentConversionError(f"Unsupported comparison period '{grain}' (use month, quarter or year).")
+    return start, end
+
+
+def _build_comparison(
+    spec: Dict[str, Any], question: str, today: date, assumptions: List[str], clarifications: List[str]
+) -> Optional[PeriodComparison]:
+    """Turn the extractor's comparison slot into concrete period bounds."""
+    date_column = str(spec.get("date_column") or "").strip()
+    if not date_column:
+        raise IntentConversionError("A period comparison needs a date column to cut periods on.")
+
+    grain = str(spec.get("grain") or "").strip().lower()
+    grain = {"monthly": "month", "quarterly": "quarter", "yearly": "year", "annual": "year"}.get(grain, grain)
+    if grain not in ("month", "quarter", "year"):
+        clarifications.append(
+            "Which periods should be compared: month over month, quarter over quarter, or year over year?"
+        )
+        return None
+
+    direction = str(spec.get("direction") or "change").strip().lower()
+    direction = {"increased": "increase", "decreased": "decrease", "up": "increase", "down": "decrease",
+                 "grew": "increase", "dropped": "decrease"}.get(direction, direction)
+    if direction not in ("increase", "decrease", "change"):
+        direction = "change"
+
+    offset = -1 if str(spec.get("period") or "this").strip().lower() in ("last", "previous", "prior") else 0
+    current_start, current_end = period_bounds(grain, offset, today)
+    previous_start, previous_end = period_bounds(grain, offset - 1, today)
+
+    if offset == 0 and (today - current_start).days + 1 < (current_end - current_start).days:
+        assumptions.append(
+            f"This {grain} is still in progress (through {today.isoformat()}), so it is compared "
+            f"with the full previous {grain}."
+        )
+
+    return PeriodComparison(
+        date_column=date_column,
+        grain=grain,
+        direction=direction,
+        current_start=current_start.isoformat(),
+        current_end=current_end.isoformat(),
+        previous_start=previous_start.isoformat(),
+        previous_end=previous_end.isoformat(),
+    )
+
+
 def _referenced_tables(
     intent_tables: List[str], query_intent: QueryIntent, aggregations: List[Aggregation]
 ) -> List[str]:
@@ -332,10 +413,15 @@ def _referenced_tables(
     if query_intent.order_by:
         values.append(query_intent.order_by.get("column", ""))
     values.extend(str(agg.column) for agg in aggregations if agg.column)
+    if query_intent.comparison and query_intent.comparison.get("date_column"):
+        values.append(str(query_intent.comparison["date_column"]))
     for value in values:
         expression_match = _AGGREGATION_EXPRESSION.match(str(value).strip())
         if expression_match:
             value = expression_match.group(2)
+        trunc_match = _DATE_TRUNC_EXPRESSION.match(str(value).strip())
+        if trunc_match:
+            value = trunc_match.group(1)
         if "." in value:
             table = value.split(".", 1)[0]
             if table not in tables:
@@ -453,6 +539,7 @@ def convert_query_intent(
     original_question: str,
     confidence_score: float = 0.0,
     schema: Optional[DatabaseSchema] = None,
+    today: Optional[date] = None,
 ) -> StructuredIntent:
     """
     Convert a Phase 2 QueryIntent (LLM output) into a Phase 3/4 StructuredIntent.
@@ -491,9 +578,34 @@ def convert_query_intent(
             conditions.append(converted)
 
     columns = list(query_intent.columns)
+    clarifications: List[str] = []
+    outer_aggregation: Optional[Aggregation] = None
+
+    agg_specs = list(query_intent.aggregations or [])
+    for index, spec in enumerate(agg_specs):
+        nested = _NESTED_AGGREGATION.match(str(spec).strip())
+        if nested:
+            # AVG(SUM(x)) -> inner SUM(x) grouped by the user's grouping, outer AVG.
+            outer_function, inner_spec = nested.group(1), nested.group(2).strip()
+            inner_function = inner_spec.split("(", 1)[0].strip()
+            inner_column = re.sub(r"\W+", "_", inner_spec.split("(", 1)[1].rsplit(")", 1)[0]).strip("_")
+            outer_aggregation = Aggregation(
+                aggregation_type=_AGGREGATION_MAP[outer_function.lower()],
+                column="agg_value",
+                alias=f"{outer_function}_{inner_function}_{inner_column}".lower(),
+            )
+            agg_specs[index] = inner_spec
+            columns = [c for c in columns if not _NESTED_AGGREGATION.match(str(c).strip())]
+            if not query_intent.group_by:
+                clarifications.append(
+                    f"The {outer_function.lower()} of the {inner_function.lower()} for each what? "
+                    "For example per order or per customer."
+                )
+            break
+
     aggregations = []
-    if query_intent.aggregations:
-        aggregations = convert_aggregations(query_intent.aggregations, columns)
+    if agg_specs:
+        aggregations = convert_aggregations(agg_specs, columns)
         # Columns consumed by an aggregation shouldn't also appear as a
         # plain SELECT column (they're expressed via `aggregations` instead).
         # Compare unqualified names too: the model may emit "customer_id" in
@@ -562,6 +674,42 @@ def convert_query_intent(
             columns = []
         assumptions.append("Interpreted 'how many' as a row count.")
 
+    comparison = None
+    if query_intent.comparison:
+        if len(aggregations) != 1 or not (query_intent.group_by or columns):
+            raise IntentConversionError(
+                "A period comparison needs one aggregate (e.g. total spending) and what to compare it for."
+            )
+        comparison = _build_comparison(
+            query_intent.comparison, original_question, today or date.today(), assumptions, clarifications
+        )
+        order_by = []
+
+    group_by = list(query_intent.group_by or [])
+    top_n_per_group = None
+    if query_intent.top_n_per_group:
+        spec = query_intent.top_n_per_group
+        partition = [str(c) for c in (spec.get("partition_by") or [])]
+        try:
+            top_n_per_group = TopNPerGroup(partition_by=partition, n=int(spec.get("n")))
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise IntentConversionError("Top-N per group needs the grouping column and how many to keep.") from exc
+        for column in partition:
+            if column not in columns:
+                columns.append(column)
+            if aggregations and column not in group_by:
+                group_by.append(column)
+        limit = None  # the per-group cut replaces any overall LIMIT
+        if not order_by:
+            clarifications.append("What should be ranked within each group (for example revenue or quantity sold)?")
+
+    if outer_aggregation is not None:
+        order_by, limit = [], None
+
+    if comparison is None and query_intent.comparison:
+        # Comparison period unclear: only the clarification matters.
+        order_by = []
+
     tables = _referenced_tables(list(query_intent.tables), query_intent, aggregations)
     joins = _apply_anti_join(_derive_fk_joins(tables, schema), conditions, tables, schema)
 
@@ -574,12 +722,19 @@ def convert_query_intent(
             having_conditions=having_conditions,
             joins=joins,
             aggregations=aggregations,
-            group_by=list(query_intent.group_by or []),
+            group_by=group_by,
             order_by=order_by,
             limit=limit,
             original_question=original_question,
             confidence_score=confidence_score,
-            recognized_entities={"assumptions": assumptions} if assumptions else {},
+            recognized_entities={
+                key: value for key, value in (
+                    ("assumptions", assumptions), ("clarifications", clarifications)
+                ) if value
+            },
+            comparison=comparison,
+            top_n_per_group=top_n_per_group,
+            outer_aggregation=outer_aggregation,
         )
     except ValidationError as exc:
         raise IntentConversionError(_first_validation_message(exc)) from exc

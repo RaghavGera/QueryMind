@@ -246,6 +246,42 @@ class OrderBy(BaseModel):
     )
 
 
+class PeriodComparison(BaseModel):
+    """
+    Compare an aggregate between the current period and the one before it
+    ("customers whose spending increased this quarter"). The period bounds
+    are computed from today's date by the converter -- never by the LLM --
+    and are half-open: ``start <= date < end``.
+    """
+    date_column: str = Field(description="Date column the periods are cut on, e.g. orders.order_date")
+    grain: str = Field(description="month, quarter or year")
+    direction: str = Field(description="increase, decrease or change")
+    current_start: str
+    current_end: str
+    previous_start: str
+    previous_end: str
+
+    @field_validator("grain")
+    @classmethod
+    def _valid_grain(cls, value: str) -> str:
+        if value not in ("month", "quarter", "year"):
+            raise ValueError(f"Unsupported comparison period '{value}' (use month, quarter or year).")
+        return value
+
+    @field_validator("direction")
+    @classmethod
+    def _valid_direction(cls, value: str) -> str:
+        if value not in ("increase", "decrease", "change"):
+            raise ValueError(f"Unsupported comparison direction '{value}'.")
+        return value
+
+
+class TopNPerGroup(BaseModel):
+    """Keep the first ``n`` rows (by the intent's ORDER BY) within each partition."""
+    partition_by: List[str] = Field(min_length=1, description="Columns defining each group")
+    n: int = Field(ge=1, le=1000, description="Rows to keep per group")
+
+
 class StructuredIntent(BaseModel):
     """
     Main model representing the complete structured intent of a natural language query.
@@ -370,6 +406,24 @@ class StructuredIntent(BaseModel):
         description="HAVING clause conditions (for aggregated queries)"
     )
 
+    comparison: Optional[PeriodComparison] = Field(
+        default=None,
+        description="Period-over-period comparison of the (single) aggregation"
+    )
+
+    top_n_per_group: Optional[TopNPerGroup] = Field(
+        default=None,
+        description="Top-N rows within each group (window function)"
+    )
+
+    outer_aggregation: Optional[Aggregation] = Field(
+        default=None,
+        description=(
+            "Aggregate over the grouped result of `aggregations`, e.g. AVG of the "
+            "per-order SUM (average order value). Its column is the inner aggregate."
+        )
+    )
+
     @model_validator(mode='after')
     def validate_intent(self):
         """Validate logical consistency of the structured intent."""
@@ -485,7 +539,12 @@ class StructuredIntent(BaseModel):
                     "logic": cond.logic
                 }
                 for cond in self.having_conditions
-            ]
+            ],
+            "comparison": self.comparison.model_dump() if self.comparison else None,
+            "top_n_per_group": self.top_n_per_group.model_dump() if self.top_n_per_group else None,
+            "outer_aggregation": (
+                self.outer_aggregation.model_dump(mode="json") if self.outer_aggregation else None
+            ),
         }
 
     @classmethod
@@ -566,6 +625,13 @@ class StructuredIntent(BaseModel):
                 )
                 for cond in data["having_conditions"]
             ]
+
+        if data.get("comparison"):
+            data["comparison"] = PeriodComparison(**data["comparison"])
+        if data.get("top_n_per_group"):
+            data["top_n_per_group"] = TopNPerGroup(**data["top_n_per_group"])
+        if data.get("outer_aggregation"):
+            data["outer_aggregation"] = Aggregation(**data["outer_aggregation"])
 
         return cls(**data)
 

@@ -104,3 +104,13 @@ def test_summary_only_counts_core_failures_toward_exit_code():
     assert summarize(questions, results)["core_failed"] == 0
     results[0] = RunResult("a", 1, False, failures=["x"])
     assert summarize(questions, results)["core_failed"] == 1
+
+
+def test_preview_action_is_checked_for_blocked_writes():
+    expect = {"status": ["blocked", "needs_confirmation"], "preview_action": "update"}
+    good = {"status": "blocked", "preview": {"action": "update"}, "result": {"rows": []}}
+    wrong = {"status": "blocked", "preview": {"action": "insert"}, "result": {"rows": []}}
+    missing = {"status": "blocked", "result": {"rows": []}}
+    assert check_response(expect, 200, good) == []
+    assert check_response(expect, 200, wrong)
+    assert check_response(expect, 200, missing)

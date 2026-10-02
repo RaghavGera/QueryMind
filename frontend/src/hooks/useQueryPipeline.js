@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { submitQuestion } from "../services/queryApi";
+import { confirmWrite, submitQuestion } from "../services/queryApi";
 import {
   pipelineStagesInitial,
   pipelineStagesAfterClarification,
@@ -42,12 +42,56 @@ export function useQueryPipeline({ onComplete } = {}) {
   const [result, setResult] = useState(null);
   const [executionMs, setExecutionMs] = useState(null);
   const [error, setError] = useState(null);
+  const [warnings, setWarnings] = useState([]);
+  const [confirmation, setConfirmation] = useState(null);
+  const [writeResult, setWriteResult] = useState(null);
 
   const runToken = useRef({ token: 0 });
+
+  /*
+   * Statuses that are neither "success" nor a plain clarification:
+   *
+   *   needs_confirmation  an INSERT/UPDATE was previewed; nothing has run yet
+   *   blocked (no questions)  e.g. writes disabled or a refused DELETE
+   *
+   * Returns true when the response was fully handled here.
+   */
+  const handleSpecialStatus = useCallback((response) => {
+    if (response?.status === "needs_confirmation") {
+      setConfirmation({
+        token: response.confirmation_token,
+        preview: response.preview,
+        sql: response.sql,
+        params: response.params || [],
+        expiresIn: response.expires_in,
+      });
+      setWarnings(response.warnings || []);
+      setStatus("confirming");
+      return true;
+    }
+
+    if (
+      response?.status === "blocked" &&
+      !(response.clarification_questions || []).length
+    ) {
+      setError(
+        response.error_message ||
+          response.preview?.summary ||
+          "This request was blocked.",
+      );
+      setStatus("error");
+      return true;
+    }
+
+    return false;
+  }, []);
 
   const reset = useCallback(() => {
     runToken.current.token += 1;
 
+    setWarnings([]);
+    setConfirmation(null);
+    setWriteResult(null);
     setStatus("idle");
     setQuestion("");
     setProcessingStage(0);
@@ -71,6 +115,9 @@ export function useQueryPipeline({ onComplete } = {}) {
 
       setQuestion(cleanQuestion);
       setStatus("processing");
+      setWarnings([]);
+      setConfirmation(null);
+      setWriteResult(null);
       setClarification(null);
       setSelectedChoice(null);
       setSql(null);
@@ -107,6 +154,8 @@ export function useQueryPipeline({ onComplete } = {}) {
         ]);
 
         if (runToken.current.token !== token) return;
+
+        if (handleSpecialStatus(response)) return;
 
         /*
          * Backend needs clarification.
@@ -167,6 +216,7 @@ export function useQueryPipeline({ onComplete } = {}) {
 
         if (runToken.current.token !== token) return;
 
+        setWarnings(response.warnings || []);
         setSql(response.sql || null);
 
         setResult(
@@ -196,7 +246,7 @@ export function useQueryPipeline({ onComplete } = {}) {
         setStatus("error");
       }
     },
-    [onComplete],
+    [onComplete, handleSpecialStatus],
   );
 
   const selectClarification = useCallback(
@@ -236,6 +286,8 @@ export function useQueryPipeline({ onComplete } = {}) {
 
         if (runToken.current.token !== token) return;
 
+        if (handleSpecialStatus(response)) return;
+
         if (
           response?.status === "needs_clarification" ||
           response?.status === "blocked"
@@ -265,6 +317,7 @@ export function useQueryPipeline({ onComplete } = {}) {
           );
         }
 
+        setWarnings(response.warnings || []);
         setSql(response.sql || null);
 
         setResult(
@@ -294,8 +347,37 @@ export function useQueryPipeline({ onComplete } = {}) {
         setStatus("error");
       }
     },
-    [question, onComplete],
+    [question, onComplete, handleSpecialStatus],
   );
+
+  const confirm = useCallback(async () => {
+    if (!confirmation?.token) return;
+
+    const token = runToken.current.token;
+    setStatus("executing");
+    setError(null);
+
+    try {
+      const response = await confirmWrite(confirmation.token);
+
+      if (runToken.current.token !== token) return;
+
+      setWriteResult(response);
+      setStatus("executed");
+
+      onComplete?.({
+        question,
+        resolved: null,
+        status: "success",
+        durationMs: null,
+      });
+    } catch (e) {
+      if (runToken.current.token !== token) return;
+
+      setError(e?.message || "The change could not be applied.");
+      setStatus("error");
+    }
+  }, [confirmation, question, onComplete]);
 
   return {
     status,
@@ -308,8 +390,12 @@ export function useQueryPipeline({ onComplete } = {}) {
     result,
     executionMs,
     error,
+    warnings,
+    confirmation,
+    writeResult,
 
     ask,
+    confirm,
     selectClarification,
     reset,
   };

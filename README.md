@@ -241,7 +241,8 @@ DB_NAME=text_to_sql
 
 # Groq API Configuration
 GROQ_API_KEY=your_groq_api_key_here
-GROQ_MODEL=llama-3.1-70b-versatile
+# Optional: override the model (default: qwen/qwen3.8-27b)
+# QUERYMIND_LLM_MODEL=qwen/qwen3.8-27b
 ```
 
 ### API Keys
