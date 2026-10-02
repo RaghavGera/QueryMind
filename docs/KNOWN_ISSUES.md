@@ -51,10 +51,11 @@ against the build deployed at commit `3eec66d` (before the Phase 1 changes).
    should render instead of returning Vercel's 404.
 4. Optionally restrict the Render database's allowed inbound sources to the
    backend service.
-5. **Add the failover LLM key on Render** (`GEMINI_API_KEY`). The provider
-   chain skips a provider without a key *silently*, so until it is set the
-   backend is Groq-only and a Groq daily-quota hit (200K tokens/day, observed
-   2026-10-02) still takes `/query` down.
+5. **Failover LLM key on Render** (`GEMINI_API_KEY`) - owner reports it is set
+   (2026-10-02). The chain skips an entry without a key *silently*; after the
+   deploy, check the logs for `LLM request served provider=gemini-lite` to
+   confirm Gemini is actually serving. Remove any `GEMINI_MODEL` /
+   `LLM_PROVIDER_ORDER` values copied from earlier docs.
 6. **Check `GROQ_MODEL` on Render.** The code now honours it. Old copies of
    `.env.example` suggested `llama-3.1-70b-versatile`; if that stale value is
    set, Groq requests will use (or fail on) that model. Unset it to use the

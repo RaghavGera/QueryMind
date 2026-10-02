@@ -45,8 +45,9 @@ _DAILY_QUOTA = re.compile(
     r"tokens?\s+per\s+day|requests?\s+per\s+day|\bTPD\b|\bRPD\b|per[\s_-]?day|daily",
     re.IGNORECASE,
 )
+# Groq: "Please try again in 3m53.28s"; Gemini: "Please retry in 10h5m39.009s"
 _TRY_AGAIN_IN = re.compile(
-    r"try again in\s+(?:(\d+(?:\.\d+)?)h)?\s*(?:(\d+(?:\.\d+)?)m(?!s))?\s*(?:(\d+(?:\.\d+)?)s)?",
+    r"(?:try again|retry) in\s+(?:(\d+(?:\.\d+)?)h)?\s*(?:(\d+(?:\.\d+)?)m(?!s))?\s*(?:(\d+(?:\.\d+)?)s)?",
     re.IGNORECASE,
 )
 

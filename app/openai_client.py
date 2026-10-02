@@ -7,24 +7,33 @@ them.
 
 Provider chain
 --------------
-``LLM_PROVIDER_ORDER`` (default ``gemini,groq``) is the order in which
-providers are tried. Providers without an API key are skipped, so a deployment
-that only sets ``GROQ_API_KEY`` keeps working unchanged. Only providers with a
-free tier that needs no payment method are supported.
+The chain is a list of *entries* -- a provider plus one model -- tried in
+``LLM_PROVIDER_ORDER`` (default ``gemini-lite,gemini-flash,groq``). Gemini's
+free tier quotas are per model, so its two models are separate entries that
+share ``GEMINI_API_KEY``: Flash-Lite (larger daily quota) first, then Flash.
+``gemini`` in LLM_PROVIDER_ORDER is shorthand for both Gemini entries.
 
-A provider that reports a *daily* quota exhaustion is parked for a cooldown
-(``mark_exhausted``) so later requests go straight to the next provider
-instead of paying a failed round trip every time. The failover policy itself
-lives in ``app.intent_extractor._create_completion_with_retry``.
+Entries whose API key is missing are skipped, so a deployment that only sets
+``GROQ_API_KEY`` keeps working unchanged. Only providers with a free tier that
+needs no payment method are supported (Mistral and Cerebras were dropped).
 
-Per-provider settings
----------------------
-=========  ==================  ===============  =======================================
-provider   API key             model override   default model
-=========  ==================  ===============  =======================================
-gemini     GEMINI_API_KEY      GEMINI_MODEL     gemini-3.5-flash
-groq       GROQ_API_KEY        GROQ_MODEL       qwen/qwen3.8-27b
-=========  ==================  ===============  =======================================
+An entry that reports a *daily* quota exhaustion is parked for a cooldown
+(``mark_exhausted``) so later requests go straight to the next entry instead
+of paying a failed round trip every time. The failover policy itself lives in
+``app.intent_extractor._create_completion_with_retry``.
+
+Entries
+-------
+============  ==============  ==================  =====================  =================
+entry         API key         model override      default model          free tier (owner)
+============  ==============  ==================  =====================  =================
+gemini-lite   GEMINI_API_KEY  GEMINI_LITE_MODEL   gemini-3.1-flash-lite  500 requests/day
+gemini-flash  GEMINI_API_KEY  GEMINI_FLASH_MODEL  gemini-3.8-flash       20 requests/day
+groq          GROQ_API_KEY    GROQ_MODEL          qwen/qwen3.8-27b       200K tokens/day
+============  ==============  ==================  =====================  =================
+
+Gemini model IDs were checked against the API's model list on 2026-10-02
+(gemini-2.5-flash is listed but returns 404 "no longer available to new users").
 """
 
 import logging
@@ -61,10 +70,16 @@ class ProviderSpec:
     tool_choice: str
 
 
+_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
 PROVIDERS: Dict[str, ProviderSpec] = {
-    "gemini": ProviderSpec(
-        "gemini", "GEMINI_API_KEY", "GEMINI_MODEL",
-        "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-3.5-flash", "auto",
+    "gemini-lite": ProviderSpec(
+        "gemini-lite", "GEMINI_API_KEY", "GEMINI_LITE_MODEL",
+        _GEMINI_BASE_URL, "gemini-3.1-flash-lite", "auto",
+    ),
+    "gemini-flash": ProviderSpec(
+        "gemini-flash", "GEMINI_API_KEY", "GEMINI_FLASH_MODEL",
+        _GEMINI_BASE_URL, "gemini-3.8-flash", "auto",
     ),
     "groq": ProviderSpec(
         "groq", "GROQ_API_KEY", "GROQ_MODEL",
@@ -72,7 +87,9 @@ PROVIDERS: Dict[str, ProviderSpec] = {
     ),
 }
 
-DEFAULT_PROVIDER_ORDER = "gemini,groq"
+DEFAULT_PROVIDER_ORDER = "gemini-lite,gemini-flash,groq"
+# Shorthands accepted in LLM_PROVIDER_ORDER.
+_ALIASES = {"gemini": ["gemini-lite", "gemini-flash"]}
 LLM_REQUEST_TIMEOUT_SECONDS = 30.0
 
 _PLACEHOLDERS = {"your_groq_api_key_here", "your_gemini_api_key_here"}
@@ -120,16 +137,17 @@ _exhausted_until: Dict[str, float] = {}  # provider name -> time.monotonic() dea
 
 
 def provider_order() -> List[str]:
-    """Provider names in the configured order (unknown names are ignored)."""
+    """Chain entry names in the configured order (unknown names are ignored)."""
     raw = os.getenv("LLM_PROVIDER_ORDER", "").strip() or DEFAULT_PROVIDER_ORDER
     order = []
-    for name in (part.strip().lower() for part in raw.split(",")):
-        if not name or name in order:
-            continue
-        if name not in PROVIDERS:
-            logger.warning("Ignoring unknown provider %r in LLM_PROVIDER_ORDER", name)
-            continue
-        order.append(name)
+    for part in (part.strip().lower() for part in raw.split(",")):
+        for name in _ALIASES.get(part, [part]):
+            if not name or name in order:
+                continue
+            if name not in PROVIDERS:
+                logger.warning("Ignoring unknown provider %r in LLM_PROVIDER_ORDER", name)
+                continue
+            order.append(name)
     return order
 
 

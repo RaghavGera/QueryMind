@@ -267,9 +267,10 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | Variable | Required | Notes |
 |---|---|---|
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | yes | Set **all five**. Setting only `DATABASE_URL` is ignored and silently falls back to `localhost:5432` (this caused an outage once). |
-| `GEMINI_API_KEY`, `GROQ_API_KEY` | at least one | Each provider with a key joins the failover chain; a provider without a key is skipped silently. |
-| `LLM_PROVIDER_ORDER` | no | Try order, default `gemini,groq`. Unknown names are ignored. |
-| `GEMINI_MODEL` | no | Default `gemini-3.5-flash`. (`gemini-2.5-flash` returns 404 "no longer available to new users" for keys created now; `gemini-3.8-flash` was returning 503 "high demand" when checked on 2026-10-02.) |
+| `GEMINI_API_KEY`, `GROQ_API_KEY` | at least one | Each provider with a key joins the failover chain; one without a key is skipped silently. `GEMINI_API_KEY` enables both Gemini entries. |
+| `LLM_PROVIDER_ORDER` | no | Try order, default `gemini-lite,gemini-flash,groq` (`gemini` = both Gemini entries). Unknown names are ignored. |
+| `GEMINI_LITE_MODEL` | no | Default `gemini-3.1-flash-lite` (free tier: 500 requests/day). |
+| `GEMINI_FLASH_MODEL` | no | Default `gemini-3.8-flash` (free tier: 20 requests/day). |
 | `GROQ_MODEL` | no | Default `qwen/qwen3.8-27b`. Older copies of `.env.example` suggested `llama-3.1-70b-versatile`; make sure a stale value is not set. |
 | `BACKEND_CORS_ORIGINS` | no | Comma-separated; defaults include `http://localhost:5173` and the Vercel URL. |
 | `QUERYMIND_ENABLE_WRITES` | no | `true` allows confirmed natural-language INSERT/UPDATE. **Off by default** - leave it off on a public demo database. |
@@ -281,19 +282,24 @@ The Vercel project's **Root Directory must be `frontend/`** so `frontend/vercel.
 
 ## LLM providers, failover and rate limits
 
-All LLM calls go through `app/openai_client.py`. The chain is Gemini (Google
-AI Studio, `https://generativelanguage.googleapis.com/v1beta/openai/`) then
-Groq; both have free tiers that need no payment method (Mistral and Cerebras
-were considered and dropped because they do). Each request uses the standard
-`tools` API (`tool_choice` is `auto` for Gemini, the only value its
-compatibility layer documents, and `required` for Groq) and `max_tokens=800`
-for both providers.
+All LLM calls go through `app/openai_client.py`. The chain has three entries:
+Gemini 3.1 Flash-Lite, then Gemini 3.8 Flash (both via Google AI Studio,
+`https://generativelanguage.googleapis.com/v1beta/openai/`, sharing
+`GEMINI_API_KEY`; Gemini's free-tier quotas are per model), then Groq. Both
+providers have free tiers that need no payment method (Mistral and Cerebras
+were dropped because they require one). The Gemini model IDs were checked
+against the API's model list on 2026-10-02; note `gemini-2.5-flash` is still
+listed but returns 404 "no longer available to new users", and
+`gemini-3.8-flash` intermittently returns 503 "high demand" (the chain fails
+over). Each request uses the standard `tools` API (`tool_choice` is `auto` for
+Gemini, the only value its compatibility layer documents, and `required` for
+Groq) and `max_tokens=800` for every entry.
 
 Failover policy per request (`_create_completion_with_retry` in `app/intent_extractor.py`):
 
 | Provider response | What happens |
 |---|---|
-| 429 mentioning a daily quota (tokens/requests per day, TPD/RPD, "daily") | Provider is parked for the time it reports ("try again in 3m53s"; default 15 min) and the next provider is tried immediately. No retry. |
+| 429 mentioning a daily quota (tokens/requests per day, TPD/RPD, `...PerDay...` quota IDs, "daily") | That entry is parked for the time it reports (Groq: "try again in 3m53s", Gemini: "retry in 10h5m39s"; default 15 min) and the next entry is tried immediately. No retry. Gemini's per-model quotas mean Flash-Lite running out does not park Flash. |
 | 429 per-minute | One retry after `Retry-After` (or ~1 s); if `Retry-After` is over 8 s, no wait. Then the next provider. |
 | 5xx, timeout (30 s), connection error | Next provider. |
 | Other 4xx (bad key, unknown model, rejected request) or an unusable answer | Next provider, so one misconfigured provider cannot take `/query` down. |
@@ -309,8 +315,10 @@ tokens/minute, 1,000 requests/day and 200,000 tokens/day; one extraction
 request ("What were our top 10 products?", schema trimmed to 2 tables) used 1,028 prompt + 139 completion
 tokens, so the daily token cap allows roughly 170 questions.
 
-**Render:** after deploying, set `GEMINI_API_KEY` on the service. A provider
-without a key is skipped silently, so without it the chain is Groq only.
+**Render:** after deploying, `GEMINI_API_KEY` must be set on the service. An
+entry without a key is skipped silently, so without it the chain is Groq only.
+If `LLM_PROVIDER_ORDER` or `GEMINI_MODEL` were set there from an earlier
+version of these docs, remove them (`GEMINI_MODEL` is no longer read).
 
 ### Prompt size
 

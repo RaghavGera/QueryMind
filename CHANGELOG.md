@@ -34,12 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allow-listed units, schema-validated column).
 - Frontend: confirmation panel for writes (preview, Confirm/Cancel), backend `warnings` /
   assumptions shown to the user, `blocked` responses without questions shown as messages.
-- **LLM provider failover chain**: Gemini (Google AI Studio) then Groq, tried in
-  `LLM_PROVIDER_ORDER` (default `gemini,groq`); a provider without a key is skipped. Both are free
-  without a payment method (Mistral and Cerebras were dropped because they require one).
+- **LLM provider failover chain**: Gemini 3.1 Flash-Lite, then Gemini 3.8 Flash (Google AI Studio,
+  one `GEMINI_API_KEY`, per-model quotas), then Groq, tried in `LLM_PROVIDER_ORDER` (default
+  `gemini-lite,gemini-flash,groq`; `gemini` = both Gemini entries); entries without a key are
+  skipped. Both providers are free without a payment method (Mistral and Cerebras were dropped
+  because they require one).
   A daily-quota 429 parks the provider and fails over immediately; a per-minute 429 gets one short
   retry; 5xx/timeouts/other 4xx fail over. `/query` returns 429 only when every provider is rate
-  limited. Per-provider model overrides `GEMINI_MODEL` (default `gemini-3.5-flash`), `GROQ_MODEL`.
+  limited. Model overrides `GEMINI_LITE_MODEL` (default `gemini-3.1-flash-lite`),
+  `GEMINI_FLASH_MODEL` (default `gemini-3.8-flash`), `GROQ_MODEL`.
   Each served request logs provider, model, `prompt_tokens` and `completion_tokens`.
 - **Per-question schema trimming**: only the tables `EntityRecognizer` finds, plus metric tables and
   foreign-key neighbours, are sent to the LLM; full schema when nothing is recognised. Validation

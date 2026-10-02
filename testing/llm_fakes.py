@@ -14,7 +14,7 @@ import openai
 
 import app.openai_client as client_module
 
-ALL_KEY_ENVS = [spec.key_env for spec in client_module.PROVIDERS.values()]
+ALL_KEY_ENVS = sorted({spec.key_env for spec in client_module.PROVIDERS.values()})
 ALL_MODEL_ENVS = [spec.model_env for spec in client_module.PROVIDERS.values()]
 
 DEFAULT_ARGUMENTS = '{"query_type": "select", "tables": ["customers"]}'
@@ -99,10 +99,14 @@ def clear_provider_env(monkeypatch) -> None:
 
 
 def use_providers(monkeypatch, **completions_by_provider: FakeCompletions) -> None:
-    """Configure exactly these providers, in keyword order, backed by fakes."""
+    """
+    Configure exactly these chain entries, in keyword order, backed by fakes.
+    Underscores stand for hyphens: ``gemini_lite=`` configures ``gemini-lite``.
+    """
     clear_provider_env(monkeypatch)
-    monkeypatch.setenv("LLM_PROVIDER_ORDER", ",".join(completions_by_provider))
-    for name, completions in completions_by_provider.items():
+    names = [name.replace("_", "-") for name in completions_by_provider]
+    monkeypatch.setenv("LLM_PROVIDER_ORDER", ",".join(names))
+    for name, completions in zip(names, completions_by_provider.values()):
         spec = client_module.PROVIDERS[name]
         monkeypatch.setenv(spec.key_env, f"test-key-{name}")
         monkeypatch.setenv(spec.model_env, f"{name}-test-model")
