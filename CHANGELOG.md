@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `frontend/vercel.json` SPA rewrite so hard-refreshing `/app`, `/architecture` and
+  `/developers` no longer 404s on Vercel.
+- **Eval harness** (`python -m testing.eval_harness`): runs `testing/eval_questions.json`
+  through `POST /query` against any base URL (or `--offline` with the real LLM and no
+  database), checks HTTP status, response status, SQL shape, row counts and cells, repeats
+  runs to expose model variance, and exits non-zero on any core failure. Questions tagged
+  `known_gap` are reported but do not fail the run.
+- `python -m testing.run_tests` runs every offline suite the way each is meant to be run.
+- HAVING support: conditions on aggregates ("more than 5 orders") become `HAVING` clauses.
+- Anti-joins: "customers who never ordered" renders `LEFT JOIN ... IS NULL`.
+- **Natural-language INSERT/UPDATE** with a mandatory confirmation step. `/query` never
+  writes; it returns `status: "needs_confirmation"`, a preview (with the affected-row count
+  for UPDATEs) and a signed, single-use, 5-minute token. `POST /query/confirm` executes
+  exactly that statement and rolls back if the affected row count changed. Writes are
+  disabled unless `QUERYMIND_ENABLE_WRITES=true` (see SETUP.md); `QUERYMIND_CONFIRM_SECRET`
+  keeps tokens valid across restarts. NL `DELETE` is refused.
+- Required-column check for INSERT: missing NOT NULL values become clarification questions.
+- `docs/KNOWN_ISSUES.md`: observed behaviour per question, owner actions, open gaps.
+
+### Changed
+- LLM calls retry 429/5xx/connection errors with exponential backoff (honouring
+  `Retry-After`); failures map to honest HTTP statuses (429 / 503 / 502) with a structured
+  body instead of a traceback. `max_tokens` stays pinned at 800.
+- `/query` never returns a traceback: any unexpected error is a structured 500.
+- Extractor prompt is pinned in a module constant, carries few-shot examples and
+  aggregation rules, and appends write guidance only for write-like questions.
+- Text comparisons (`=`, `!=`, `IN`, `LIKE`) on text columns are case-insensitive.
+- `execute_query` debug-file write on every request replaced by `logging`.
+
+### Fixed
+- **Silent wrong answers from case-sensitive filters**: "Show cancelled orders" returned 0
+  rows because values are stored as `Cancelled`.
+- **Guessed answers to vague questions**: "expensive products", "recent orders",
+  "top customers" used to run with an invented threshold/window/metric. They now ask
+  (`app/vague_terms.py`, applied independent of what the LLM guessed). A user's clarification
+  is never re-asked.
+- "How many ...?" answered with a row listing now becomes a `COUNT`.
+- "top N products" with no metric no longer bounces back with "What aggregation do you
+  want?"; it ranks by units sold and says so in `warnings`.
+- Qualified condition columns (`customers.signup_date`) no longer trigger a false
+  "which date column?" clarification for "last month".
+- Pydantic validation failures in the converter are 422s, not crashes.
+
 ## [0.4.0] - 2026-09-20
 
 ### Added - Phase 4: SQL Generation ✅

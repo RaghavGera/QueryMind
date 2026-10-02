@@ -20,6 +20,8 @@ could be wrong.
 import re
 from typing import Any, Dict, List, Optional
 
+from pydantic import ValidationError
+
 from app.intent_extractor import QueryIntent
 from app.models import (
     Aggregation,
@@ -34,6 +36,7 @@ from app.models import (
     StructuredIntent,
 )
 from app.schema import DatabaseSchema
+from app.vague_terms import DEFAULTABLE_RANKING, needs_ranking_metric
 
 
 class IntentConversionError(Exception):
@@ -92,6 +95,8 @@ _AGGREGATION_MAP = {
     "group_concat": AggregationType.GROUP_CONCAT,
 }
 
+_PLAIN_QUALIFIED = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*")
+
 _AGGREGATION_EXPRESSION = re.compile(
     r"^(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\s*\(\s*(.*?)\s*\)$",
     re.IGNORECASE,
@@ -105,11 +110,18 @@ def convert_condition(raw: Dict[str, Any]) -> Condition:
     if operator is None:
         raise IntentConversionError(f"Unrecognized condition operator: '{raw.get('operator')}'")
 
+    column = str(raw["column"]).strip()
+    table = raw.get("table")
+    # The model often emits "customers.signup_date" as the column. Split it so
+    # downstream checks (date-column detection, validation) see a bare column.
+    if "." in column and not table and _PLAIN_QUALIFIED.fullmatch(column):
+        table, column = column.split(".", 1)
+
     return Condition(
         operator=operator,
-        column=raw["column"],
+        column=column,
         value=raw.get("value"),
-        table=raw.get("table"),
+        table=table,
     )
 
 
@@ -205,6 +217,112 @@ def convert_aggregations(
     return aggregations
 
 
+_TOP_N = re.compile(r"\btop\s+(\d+)\b", re.IGNORECASE)
+
+
+def _resolve_group_table(
+    group_column: str, candidate_tables: List[str], schema: DatabaseSchema
+) -> Optional[str]:
+    """Find the schema table a group-by column (qualified or not) belongs to."""
+    if "." in group_column:
+        table, column = group_column.split(".", 1)
+        info = schema.tables.get(table)
+        return table if info and column in info.columns else None
+    for table in candidate_tables:
+        info = schema.tables.get(table)
+        if info and group_column in info.columns:
+            return table
+    return None
+
+
+def _default_ranking_metric(
+    query_intent: QueryIntent,
+    question: str,
+    schema: DatabaseSchema,
+) -> Optional[Aggregation]:
+    """
+    Safety net for the most common LLM miss: a ranking question ("top 10
+    products") returned with a GROUP BY but no aggregation, which would
+    otherwise bounce back to the user with "what aggregation do you want?".
+
+    Rank by units sold -- SUM(<child>.quantity) over the child table that
+    references the grouped table -- but only when the schema makes that
+    unambiguous (exactly one such child table). Returns None otherwise, so
+    genuinely unclear questions still fall through to a clarification.
+    """
+    if not DEFAULTABLE_RANKING.search(question):
+        return None
+
+    group_tables = {
+        _resolve_group_table(column, list(query_intent.tables), schema)
+        for column in (query_intent.group_by or [])
+    }
+    if len(group_tables) != 1 or None in group_tables:
+        return None
+    (group_table,) = group_tables
+
+    children = [
+        name for name, info in schema.tables.items()
+        if "quantity" in info.columns
+        and any(fk.referenced_table == group_table for fk in info.foreign_keys)
+    ]
+    if len(children) != 1:
+        return None
+
+    column = f"{children[0]}.quantity"
+    return Aggregation(
+        aggregation_type=AggregationType.SUM,
+        column=column,
+        alias=f"sum_{children[0]}_quantity",
+    )
+
+
+# "how many customers ...", "how many orders were placed ..."
+_HOW_MANY = re.compile(r"^\s*how\s+many\b", re.IGNORECASE)
+
+
+def _apply_anti_join(
+    joins: List[Join], conditions: List[Condition], tables: List[str], schema: Optional[DatabaseSchema]
+) -> List[Join]:
+    """
+    "Customers who never placed an order" arrives as ``orders.order_id IS NULL``
+    over an INNER JOIN, which can never match. Re-orient it as the anti-join the
+    user means: start from the referenced table and LEFT JOIN the child, so the
+    IS NULL test sees the unmatched rows.
+    """
+    if schema is None:
+        return joins
+    null_tables = set()
+    for condition in conditions:
+        if condition.operator != ConditionOperator.IS_NULL:
+            continue
+        if condition.table:
+            null_tables.add(condition.table)
+        else:
+            owners = [
+                t for t in tables
+                if t in schema.tables and condition.column in schema.tables[t].columns
+            ]
+            if len(owners) == 1:
+                null_tables.add(owners[0])
+
+    rewritten = []
+    for join in joins:
+        # Joins are (FK holder = left) -> (referenced = right). The null-tested
+        # table is the holder; it must hang off the referenced table.
+        if join.left_table in null_tables and join.right_table not in null_tables:
+            rewritten.append(Join(
+                join_type=JoinType.LEFT,
+                left_table=join.right_table,
+                right_table=join.left_table,
+                left_column=join.right_column,
+                right_column=join.left_column,
+            ))
+        else:
+            rewritten.append(join)
+    return rewritten
+
+
 def _referenced_tables(
     intent_tables: List[str], query_intent: QueryIntent, aggregations: List[Aggregation]
 ) -> List[str]:
@@ -252,6 +370,84 @@ def _derive_fk_joins(tables: List[str], schema: Optional[DatabaseSchema]) -> Lis
             seen.add(key)
     return joins
 
+_INTEGER_TYPES = {"integer", "bigint", "smallint"}
+_DECIMAL_TYPES = {"numeric", "decimal", "real", "double precision"}
+
+
+def _first_validation_message(exc: ValidationError) -> str:
+    errors = exc.errors()
+    return errors[0]["msg"].removeprefix("Value error, ") if errors else str(exc)
+
+
+def _coerce_value(value: Any, table: str, column: str, schema: Optional[DatabaseSchema]) -> Any:
+    """Turn a stated value into the column's type; reject what can't be."""
+    info = schema.tables.get(table) if schema else None
+    col = info.columns.get(column) if info else None
+    if col is None or not isinstance(value, str):
+        return value
+    data_type = col.data_type.lower()
+    text = value.strip().replace(",", "")
+    try:
+        if data_type in _INTEGER_TYPES:
+            return int(text)
+        if data_type in _DECIMAL_TYPES:
+            return float(text)
+    except ValueError:
+        raise IntentConversionError(f"'{column}' expects a number, but got '{value}'.")
+    return value
+
+
+def _convert_write(
+    query_type: QueryType,
+    query_intent: QueryIntent,
+    original_question: str,
+    confidence_score: float,
+    schema: Optional[DatabaseSchema],
+) -> StructuredIntent:
+    """Build an INSERT/UPDATE intent from the extractor's explicit ``values``."""
+    verb = query_type.value
+    tables = list(dict.fromkeys(query_intent.tables))
+    if len(tables) != 1:
+        raise IntentConversionError(f"{verb} must target exactly one table.")
+    table = tables[0]
+
+    if not query_intent.values:
+        raise IntentConversionError(
+            f"I couldn't tell which values to {verb.lower()}. "
+            "State them explicitly, e.g. \"set the price of Laptop 1 to 999\"."
+        )
+
+    values: Dict[str, Any] = {}
+    for key, raw in query_intent.values.items():
+        name = str(key).strip()
+        if "." in name:
+            prefix, name = name.split(".", 1)
+            if prefix != table:
+                raise IntentConversionError(f"Column '{key}' does not belong to {table}.")
+        values[name] = _coerce_value(raw, table, name, schema)
+
+    conditions = [convert_condition(c) for c in (query_intent.conditions or [])]
+    for condition in conditions:
+        if condition.table not in (None, table):
+            raise IntentConversionError(
+                f"A {verb.lower()} can only filter on {table}, not {condition.table}."
+            )
+        condition.table = table
+
+    fields = {"insert_values": values} if query_type == QueryType.INSERT else {"update_values": values}
+    try:
+        return StructuredIntent(
+            query_type=query_type,
+            tables=[table],
+            conditions=conditions,
+            original_question=original_question,
+            confidence_score=confidence_score,
+            **fields,
+        )
+    except ValidationError as exc:
+        raise IntentConversionError(_first_validation_message(exc)) from exc
+
+
 def convert_query_intent(
     query_intent: QueryIntent,
     original_question: str,
@@ -278,7 +474,21 @@ def convert_query_intent(
     if query_type is None:
         raise IntentConversionError(f"Unrecognized query type: '{query_intent.query_type}'")
 
-    conditions = [convert_condition(c) for c in (query_intent.conditions or [])]
+    if query_type in (QueryType.INSERT, QueryType.UPDATE):
+        return _convert_write(
+            query_type, query_intent, original_question, confidence_score, schema
+        )
+
+    # A condition on an aggregate ("more than 5 orders" -> COUNT(...) > 5) is a
+    # HAVING clause, not a WHERE clause.
+    conditions = []
+    having_conditions = []
+    for raw_condition in (query_intent.conditions or []):
+        converted = convert_condition(raw_condition)
+        if _AGGREGATION_EXPRESSION.match(converted.column.strip()):
+            having_conditions.append(converted)
+        else:
+            conditions.append(converted)
 
     columns = list(query_intent.columns)
     aggregations = []
@@ -305,29 +515,71 @@ def convert_query_intent(
         direction = OrderDirection.DESC if query_intent.order_by.get("direction", "asc").lower() == "desc" else OrderDirection.ASC
         order_by = [OrderBy(column=query_intent.order_by["column"], direction=direction)]
 
+    assumptions: List[str] = []
+    limit = query_intent.limit
+    if (
+        schema is not None
+        and query_intent.group_by
+        and query_type in (QueryType.SELECT, QueryType.AGGREGATE)
+        and needs_ranking_metric(original_question)
+    ):
+        # "top 10 products" names no metric. Where the schema makes the answer
+        # unambiguous (units sold) use it -- and say so. Otherwise do nothing:
+        # the AmbiguityDetector will ask which metric the user means.
+        default_metric = _default_ranking_metric(query_intent, original_question, schema)
+        if default_metric is not None:
+            if aggregations:
+                used = aggregations[0]
+                metric_text = f"{used.aggregation_type.value}({used.column or '*'})"
+                assumption = f"No ranking metric was given, so results are ranked by {metric_text}."
+            else:
+                aggregations = [default_metric]
+                order_by = [OrderBy(
+                    column=f"SUM({default_metric.column})", direction=OrderDirection.DESC
+                )]
+                columns = [
+                    c for c in columns
+                    if str(c).split(".")[-1].strip().lower()
+                    != str(default_metric.column).split(".")[-1].strip().lower()
+                ]
+                metric_text = f"{default_metric.aggregation_type.value}({default_metric.column})"
+                assumption = f"No ranking metric was given, so results are ranked by units sold ({metric_text})."
+            top_n = _TOP_N.search(original_question)
+            if limit is None and top_n:
+                limit = int(top_n.group(1))
+            assumptions.append(assumption)
+
+    if (
+        not aggregations
+        and not having_conditions
+        and query_type in (QueryType.SELECT, QueryType.COUNT, QueryType.AGGREGATE)
+        and _HOW_MANY.match(original_question)
+    ):
+        # "How many ...?" is a count. The model occasionally returns a plain
+        # row listing instead; a count is the only reading of the question.
+        aggregations = [Aggregation(aggregation_type=AggregationType.COUNT, column=None, alias="count_all")]
+        if not query_intent.group_by:
+            columns = []
+        assumptions.append("Interpreted 'how many' as a row count.")
+
     tables = _referenced_tables(list(query_intent.tables), query_intent, aggregations)
-    joins = _derive_fk_joins(tables, schema)
+    joins = _apply_anti_join(_derive_fk_joins(tables, schema), conditions, tables, schema)
 
-    if query_type in (QueryType.INSERT, QueryType.UPDATE):
-        # Phase 2's function schema has no slot for insert/update payload
-        # values, so there is nothing correct to build here yet -- fail
-        # loudly rather than emit a query with fabricated values.
-        raise IntentConversionError(
-            f"{query_type.value} queries need explicit values, which the current NLU "
-            "layer (Phase 2) doesn't extract yet. Provide a StructuredIntent with "
-            "insert_values/update_values directly instead of going through natural language."
+    try:
+        return StructuredIntent(
+            query_type=query_type,
+            tables=tables,
+            columns=columns,
+            conditions=conditions,
+            having_conditions=having_conditions,
+            joins=joins,
+            aggregations=aggregations,
+            group_by=list(query_intent.group_by or []),
+            order_by=order_by,
+            limit=limit,
+            original_question=original_question,
+            confidence_score=confidence_score,
+            recognized_entities={"assumptions": assumptions} if assumptions else {},
         )
-
-    return StructuredIntent(
-        query_type=query_type,
-        tables=tables,
-        columns=columns,
-        conditions=conditions,
-        joins=joins,
-        aggregations=aggregations,
-        group_by=list(query_intent.group_by or []),
-        order_by=order_by,
-        limit=query_intent.limit,
-        original_question=original_question,
-        confidence_score=confidence_score,
-    )
+    except ValidationError as exc:
+        raise IntentConversionError(_first_validation_message(exc)) from exc

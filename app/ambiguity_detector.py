@@ -22,6 +22,7 @@ from datetime import datetime
 
 from app.models import StructuredIntent, QueryType
 from app.schema import DatabaseSchema
+from app import vague_terms
 
 
 class AmbiguityType(str, Enum):
@@ -36,6 +37,7 @@ class AmbiguityType(str, Enum):
     AMBIGUOUS_VALUE = "ambiguous_value"
     MULTIPLE_JOIN_PATHS = "multiple_join_paths"
     UNCLEAR_GROUPING = "unclear_grouping"
+    VAGUE_TERM = "vague_term"
 
 
 class SeverityLevel(str, Enum):
@@ -165,6 +167,7 @@ class AmbiguityDetector:
         ambiguities.extend(self._check_unclear_ordering(intent))
         ambiguities.extend(self._check_time_references(intent))
         ambiguities.extend(self._check_join_paths(intent))
+        ambiguities.extend(self._check_vague_terms(intent))
 
         # Count severity levels
         critical_count = sum(1 for a in ambiguities if a.severity == SeverityLevel.CRITICAL)
@@ -398,6 +401,56 @@ class AmbiguityDetector:
                         ],
                         context={"time_reference": keyword}
                     ))
+
+        return ambiguities
+
+    def _check_vague_terms(self, intent: StructuredIntent) -> List[Ambiguity]:
+        """
+        Flag vague wording in the question itself ("expensive", "recent",
+        "top customers") -- independent of how the LLM chose to interpret it,
+        so a guessed threshold/window/metric never reaches the SQL.
+        """
+        ambiguities = []
+        question = intent.original_question
+
+        term = vague_terms.vague_threshold_term(question)
+        if term:
+            ambiguities.append(Ambiguity(
+                ambiguity_type=AmbiguityType.VAGUE_TERM,
+                severity=SeverityLevel.HIGH,
+                description=f"'{term}' has no defined threshold",
+                clarification_question=(
+                    f"What should count as '{term}'? Please give a specific "
+                    "threshold (for example a minimum or maximum value)."
+                ),
+                context={"term": term, "kind": "threshold"},
+            ))
+
+        term = vague_terms.vague_recency_term(question)
+        if term:
+            ambiguities.append(Ambiguity(
+                ambiguity_type=AmbiguityType.VAGUE_TERM,
+                severity=SeverityLevel.HIGH,
+                description=f"'{term}' has no defined time window",
+                clarification_question=(
+                    f"What time window should '{term}' cover? For example the "
+                    "last 7 days, the last 30 days, or the 10 most recent rows."
+                ),
+                context={"term": term, "kind": "recency"},
+            ))
+
+        term = vague_terms.needs_ranking_metric(question)
+        if term and not intent.recognized_entities.get("assumptions"):
+            ambiguities.append(Ambiguity(
+                ambiguity_type=AmbiguityType.VAGUE_TERM,
+                severity=SeverityLevel.HIGH,
+                description=f"'{term}' does not say what to rank by",
+                clarification_question=(
+                    f"What should '{term}' be ranked by? For example total "
+                    "spending, number of orders, or units sold."
+                ),
+                context={"term": term, "kind": "ranking"},
+            ))
 
         return ambiguities
 

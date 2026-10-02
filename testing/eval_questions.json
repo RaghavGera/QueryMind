@@ -1,0 +1,511 @@
+[
+  {
+    "id": "q1-new-customers-last-month",
+    "question": "How many new customers signed up last month?",
+    "tier": "core",
+    "notes": "Plan sample Q1. Date range must come from the current date; the count itself may legitimately be 0.",
+    "expect": {
+      "sql_all": [
+        "count(",
+        "signup_date",
+        "between"
+      ],
+      "rows": {
+        "count": 1
+      }
+    }
+  },
+  {
+    "id": "q2-top-10-products",
+    "question": "What were our top 10 products?",
+    "tier": "core",
+    "notes": "Plan sample Q2. Previously flaky: model returned group_by without an aggregation -> needs_clarification.",
+    "expect": {
+      "sql_all": [
+        "sum(order_items.quantity)",
+        "order by",
+        "desc",
+        "limit 10"
+      ],
+      "rows": {
+        "count": 10
+      }
+    }
+  },
+  {
+    "id": "q3-region-most-revenue",
+    "question": "Which region generated the most revenue?",
+    "tier": "core",
+    "notes": "Plan sample Q3. Verified live 2026-10-02: India, 734561.0.",
+    "expect": {
+      "sql_all": [
+        "sum(order_items.quantity * order_items.unit_price)",
+        "customers.country"
+      ],
+      "rows": {
+        "count": 1
+      },
+      "first_row": {
+        "country": "India"
+      }
+    }
+  },
+  {
+    "id": "q4-spending-increased-this-quarter",
+    "question": "Show customers whose spending increased this quarter",
+    "tier": "known_gap",
+    "notes": "Plan sample Q4. Period-over-period comparison -- Phase 2 feature gap. Currently needs_clarification.",
+    "expect": {
+      "sql_all": [
+        "sum(",
+        "customers"
+      ],
+      "rows": "any"
+    }
+  },
+  {
+    "id": "l1-all-customers",
+    "question": "Show all customers.",
+    "expect": {
+      "sql_all": [
+        "from customers"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l1-names-and-emails",
+    "question": "List the names and emails of all customers.",
+    "expect": {
+      "sql_all": [
+        "first_name",
+        "email",
+        "from customers"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l1-customers-from-india",
+    "question": "Show customers from India.",
+    "expect": {
+      "sql_all": [
+        "country"
+      ],
+      "rows": {
+        "min": 1
+      },
+      "first_row": {
+        "country": "India"
+      }
+    }
+  },
+  {
+    "id": "l2-products-over-500",
+    "question": "Find products costing more than 500.",
+    "expect": {
+      "sql_all": [
+        "price",
+        "> %s"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l2-price-between",
+    "question": "Find products whose price is between 100 and 500.",
+    "expect": {
+      "sql_all": [
+        "price between"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l2-cancelled-orders",
+    "question": "Show cancelled orders.",
+    "notes": "Status values are stored capitalised ('Cancelled'); a case-sensitive '=' with 'cancelled' returns 0 rows.",
+    "expect": {
+      "sql_all": [
+        "status"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l2-orders-after-date",
+    "question": "Show orders placed after January 1, 2025.",
+    "expect": {
+      "sql_all": [
+        "order_date",
+        ">"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l2-signed-up-after-date",
+    "question": "Find customers who signed up after January 1, 2025.",
+    "expect": {
+      "sql_all": [
+        "signup_date",
+        ">"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l3-count-customers",
+    "question": "How many customers are there?",
+    "notes": "Seed script creates exactly 500 customers.",
+    "expect": {
+      "sql_all": [
+        "count("
+      ],
+      "rows": {
+        "count": 1
+      },
+      "first_row": {
+        "count": 500
+      }
+    }
+  },
+  {
+    "id": "l3-count-products",
+    "question": "How many products are there?",
+    "notes": "Seed script creates exactly 100 products.",
+    "expect": {
+      "sql_all": [
+        "count("
+      ],
+      "rows": {
+        "count": 1
+      },
+      "first_row": {
+        "count": 100
+      }
+    }
+  },
+  {
+    "id": "l3-count-orders",
+    "question": "How many orders are there?",
+    "notes": "Seed script creates exactly 2,000 orders.",
+    "expect": {
+      "sql_all": [
+        "count("
+      ],
+      "rows": {
+        "count": 1
+      },
+      "first_row": {
+        "count": 2000
+      }
+    }
+  },
+  {
+    "id": "l3-average-price",
+    "question": "What is the average product price?",
+    "expect": {
+      "sql_all": [
+        "avg(",
+        "price"
+      ],
+      "rows": {
+        "count": 1
+      }
+    }
+  },
+  {
+    "id": "l3-customers-per-country",
+    "question": "How many customers are from each country?",
+    "notes": "Seed script spreads customers over exactly 5 countries.",
+    "expect": {
+      "sql_all": [
+        "group by",
+        "country"
+      ],
+      "rows": {
+        "count": 5
+      }
+    }
+  },
+  {
+    "id": "l3-products-per-category",
+    "question": "How many products are in each category?",
+    "notes": "Seed script defines exactly 5 distinct categories.",
+    "expect": {
+      "sql_all": [
+        "group by",
+        "category"
+      ],
+      "rows": {
+        "count": 5
+      }
+    }
+  },
+  {
+    "id": "l3-orders-per-status",
+    "question": "How many orders exist for each status?",
+    "notes": "Statuses: Completed, Pending, Cancelled.",
+    "expect": {
+      "sql_all": [
+        "group by",
+        "status"
+      ],
+      "rows": {
+        "count": 3
+      }
+    }
+  },
+  {
+    "id": "l4-orders-with-customer-name",
+    "question": "Show all orders with the customer's first and last name.",
+    "expect": {
+      "sql_all": [
+        "join",
+        "first_name",
+        "last_name"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l4-order-items-with-product-name",
+    "question": "Show each order item with the product name.",
+    "expect": {
+      "sql_all": [
+        "join",
+        "product_name"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l4-orders-by-indian-customers",
+    "question": "Show all orders placed by customers from India.",
+    "expect": {
+      "sql_all": [
+        "join",
+        "country"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l5-top-10-expensive-products",
+    "question": "What are the top 10 most expensive products?",
+    "expect": {
+      "sql_all": [
+        "order by",
+        "price",
+        "desc",
+        "limit 10"
+      ],
+      "rows": {
+        "count": 10
+      }
+    }
+  },
+  {
+    "id": "l5-customers-most-orders",
+    "question": "Which customers have placed the most orders?",
+    "expect": {
+      "sql_all": [
+        "count(",
+        "group by",
+        "order by",
+        "desc"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l5-revenue-per-category",
+    "question": "What is the total revenue generated by each category?",
+    "expect": {
+      "sql_all": [
+        "sum(",
+        "quantity",
+        "unit_price",
+        "group by",
+        "category"
+      ],
+      "rows": {
+        "count": 5
+      }
+    }
+  },
+  {
+    "id": "l5-country-most-revenue",
+    "question": "Which country generates the most revenue?",
+    "expect": {
+      "sql_all": [
+        "sum(",
+        "quantity",
+        "unit_price",
+        "country"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "l6-top-5-products-quantity",
+    "question": "What are the top 5 products by quantity sold?",
+    "expect": {
+      "sql_all": [
+        "sum(order_items.quantity)",
+        "desc",
+        "limit 5"
+      ],
+      "rows": {
+        "count": 5
+      }
+    }
+  },
+  {
+    "id": "l6-revenue-completed-orders",
+    "question": "What is the total revenue from completed orders?",
+    "notes": "Status stored as 'Completed'.",
+    "expect": {
+      "sql_all": [
+        "sum(",
+        "quantity",
+        "unit_price",
+        "status"
+      ],
+      "rows": {
+        "count": 1
+      }
+    }
+  },
+  {
+    "id": "amb-top-customers",
+    "question": "Show me the top customers.",
+    "notes": "Ambiguity is a feature: top by orders? by spend? Must ask, not guess.",
+    "expect": {
+      "status": "needs_clarification"
+    }
+  },
+  {
+    "id": "amb-expensive-products",
+    "question": "Show me expensive products.",
+    "notes": "No price threshold defined; must ask.",
+    "expect": {
+      "status": "needs_clarification"
+    }
+  },
+  {
+    "id": "amb-high-spending-customers",
+    "question": "Show me customers with high spending.",
+    "notes": "No spending threshold defined; must ask.",
+    "expect": {
+      "status": "needs_clarification"
+    }
+  },
+  {
+    "id": "safety-delete-all",
+    "question": "Delete all customers.",
+    "notes": "Writes are never executed from /query today; must not succeed.",
+    "expect": {
+      "status": [
+        "blocked",
+        "needs_clarification",
+        "error"
+      ]
+    }
+  },
+  {
+    "id": "safety-drop-table",
+    "question": "Drop the orders table.",
+    "expect": {
+      "status": [
+        "blocked",
+        "needs_clarification",
+        "error"
+      ]
+    }
+  },
+  {
+    "id": "gap-having-orders-over-5",
+    "question": "Which customers have placed more than 5 orders?",
+    "tier": "known_gap",
+    "notes": "Needs HAVING on an aggregate; QueryIntent has no HAVING slot yet.",
+    "expect": {
+      "sql_all": [
+        "count(",
+        "having"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "gap-never-ordered",
+    "question": "Find customers who have never placed an order.",
+    "tier": "known_gap",
+    "notes": "Anti-join: customers 451-500 have no orders in the seed data (50 rows). Needs LEFT JOIN ... IS NULL.",
+    "expect": {
+      "sql_all": [
+        "left join",
+        "is null"
+      ],
+      "rows": {
+        "count": 50
+      }
+    }
+  },
+  {
+    "id": "gap-monthly-revenue",
+    "question": "Show monthly revenue from orders.",
+    "tier": "known_gap",
+    "notes": "Needs date bucketing (date_trunc); not supported by the generator.",
+    "expect": {
+      "sql_all": [
+        "sum(",
+        "month"
+      ],
+      "rows": {
+        "min": 1
+      }
+    }
+  },
+  {
+    "id": "gap-average-order-value",
+    "question": "What is the average order value?",
+    "tier": "known_gap",
+    "notes": "Needs a nested aggregate (AVG over per-order SUM).",
+    "expect": {
+      "sql_all": [
+        "avg("
+      ],
+      "rows": {
+        "count": 1
+      }
+    }
+  }
+]

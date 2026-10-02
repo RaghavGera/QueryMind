@@ -690,6 +690,8 @@ def main():
 
     # Print summary
     print_summary(results)
+    if not all(results.values()):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

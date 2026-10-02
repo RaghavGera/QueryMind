@@ -9,8 +9,78 @@ aggregations, and other SQL-related operations.
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 import json
+import logging
+import re
+import random
+import time
 from app.openai_client import get_openai_client
 from datetime import date
+
+import openai
+
+logger = logging.getLogger(__name__)
+
+# Groq's free tier throttles aggressively (429) and occasionally 5xx's. Retry
+# transient failures a few times with exponential backoff before giving up.
+LLM_MODEL = "qwen/qwen3.8-27b"
+LLM_MAX_TOKENS = 800  # Do not raise without re-verifying against Groq limits (429/502).
+LLM_MAX_RETRIES = 3
+LLM_BACKOFF_BASE_SECONDS = 1.0
+LLM_BACKOFF_CAP_SECONDS = 8.0
+
+_TRANSIENT_ERRORS = (
+    openai.RateLimitError,
+    openai.APIConnectionError,  # also covers APITimeoutError
+    openai.InternalServerError,
+)
+
+
+class IntentExtractionError(Exception):
+    """
+    Raised when the LLM could not produce a usable intent.
+
+    ``kind`` lets the API layer pick an honest HTTP status without parsing
+    messages: ``rate_limited`` (429), ``unavailable`` (503) or
+    ``invalid_response`` (502).
+    """
+
+    def __init__(self, message: str, kind: str = "invalid_response", retry_after: Optional[float] = None):
+        super().__init__(message)
+        self.kind = kind
+        self.retry_after = retry_after
+
+
+def _retry_delay(attempt: int, exc: Exception) -> float:
+    """Backoff for retry ``attempt`` (0-based), honoring a Retry-After header."""
+    response = getattr(exc, "response", None)
+    header = getattr(response, "headers", None)
+    if header is not None:
+        try:
+            return min(float(header.get("retry-after")), LLM_BACKOFF_CAP_SECONDS)
+        except (TypeError, ValueError):
+            pass
+    delay = min(LLM_BACKOFF_BASE_SECONDS * (2 ** attempt), LLM_BACKOFF_CAP_SECONDS)
+    return delay + random.uniform(0, delay / 4)
+
+
+def _create_completion_with_retry(client, **kwargs):
+    """Call the chat completion API, retrying transient failures with backoff."""
+    for attempt in range(LLM_MAX_RETRIES + 1):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except _TRANSIENT_ERRORS as exc:
+            if attempt >= LLM_MAX_RETRIES:
+                kind = "rate_limited" if isinstance(exc, openai.RateLimitError) else "unavailable"
+                raise IntentExtractionError(
+                    f"LLM provider is {'rate limiting requests' if kind == 'rate_limited' else 'unavailable'} "
+                    f"after {LLM_MAX_RETRIES + 1} attempts: {exc}",
+                    kind=kind,
+                    retry_after=LLM_BACKOFF_CAP_SECONDS,
+                ) from exc
+            delay = _retry_delay(attempt, exc)
+            logger.warning("LLM call failed (%s); retry %d/%d in %.1fs",
+                           type(exc).__name__, attempt + 1, LLM_MAX_RETRIES, delay)
+            time.sleep(delay)
 
 class QueryIntent(BaseModel):
     """
@@ -34,6 +104,71 @@ class QueryIntent(BaseModel):
     group_by: Optional[List[str]] = Field(None, description="Columns to group by")
     order_by: Optional[Dict[str, str]] = Field(None, description="Column and direction for ordering")
     limit: Optional[int] = Field(None, description="Maximum number of rows to return")
+    values: Optional[Dict[str, Any]] = Field(
+        None, description="Column -> value map for INSERT (new row) or UPDATE (new values)"
+    )
+
+
+SYSTEM_PROMPT = """You are an expert at analyzing natural language database queries and extracting structured intent.
+Given a user's question and the database schema, identify:
+- What type of query it is (select, aggregate, count, filter, join, etc.)
+- Which tables and columns are involved
+- Any filtering conditions (WHERE clauses)
+- Aggregation functions needed
+- Grouping and sorting requirements
+- Date handling: resolve relative phrases ("last month", "this quarter", "yesterday") into concrete ISO dates (YYYY-MM-DD) using the current date below. BETWEEN requires a list of exactly two values, e.g. ["2026-08-01", "2026-08-31"]. Never pass a relative phrase as a condition value.
+- Concept mapping: if the question uses a concept with no matching column (e.g. "region" when the schema only has "country"), map it to the closest available column. If no close match exists, do not invent a column.
+- Computed metrics: express metrics like revenue as arithmetic over real columns (e.g. quantity * unit_price). The engine supports arithmetic expressions inside aggregations, so emit them directly, e.g. "SUM(order_items.quantity * order_items.unit_price)".
+
+Aggregation rules (follow strictly):
+- Whenever you set group_by you MUST also set aggregations. Never return group_by with an empty aggregations list.
+- "top N <things>" / "best-selling <things>" / "most popular <things>" with no metric stated is a ranking by units sold: aggregations ["SUM(order_items.quantity)"], group_by the thing's name column, order_by that aggregation in descending order, and limit N.
+- "top N <things> by <metric>" ranks by that metric (revenue = SUM(order_items.quantity * order_items.unit_price)).
+- Always qualify columns as table.column when more than one table is involved. For a single-table query, qualified names are still preferred.
+- When aggregations are used, put only the non-aggregated dimension columns in "columns"; do not repeat the aggregated column there.
+- A condition on an aggregate ("more than 5 orders", "over 10,000 in revenue") goes in "conditions" with the aggregate expression as the column, e.g. {"column": "COUNT(orders.order_id)", "operator": ">", "value": 5}, together with the matching group_by.
+
+Examples (query intent arguments only):
+Q: What were our top 10 products?
+{"query_type": "aggregate", "tables": ["products", "order_items"], "columns": ["products.product_name"], "aggregations": ["SUM(order_items.quantity)"], "group_by": ["products.product_name"], "order_by": {"column": "SUM(order_items.quantity)", "direction": "desc"}, "limit": 10}
+Q: Which region generated the most revenue?
+{"query_type": "aggregate", "tables": ["customers", "orders", "order_items"], "columns": ["customers.country"], "aggregations": ["SUM(order_items.quantity * order_items.unit_price)"], "group_by": ["customers.country"], "order_by": {"column": "SUM(order_items.quantity * order_items.unit_price)", "direction": "desc"}, "limit": 1}
+Q: How many customers are from each country?
+{"query_type": "aggregate", "tables": ["customers"], "columns": ["customers.country"], "aggregations": ["COUNT(customers.customer_id)"], "group_by": ["customers.country"]}
+Q: Which customers have placed more than 5 orders?
+{"query_type": "aggregate", "tables": ["customers", "orders"], "columns": ["customers.first_name", "customers.last_name"], "aggregations": ["COUNT(orders.order_id)"], "group_by": ["customers.customer_id", "customers.first_name", "customers.last_name"], "conditions": [{"column": "COUNT(orders.order_id)", "operator": ">", "value": 5}]}
+Q: Show customers from India.
+{"query_type": "select", "tables": ["customers"], "columns": ["customers.first_name", "customers.last_name", "customers.country"], "conditions": [{"column": "country", "operator": "=", "value": "India", "table": "customers"}]}
+
+Use the provided schema to ensure table and column names are valid."""
+
+
+# Sections appended only when the question needs them: every extra token is
+# paid on every request, and the Groq free tier throttles on tokens.
+WRITE_GUIDANCE = """
+Writes (insert / update):
+- "add / create / insert a new <row>" -> query_type "insert", tables [the one table], values {bare column: value} using ONLY values the user stated. Never invent values; omit anything not stated.
+- "change / update / set / rename / increase ..." -> query_type "update", tables [the one table], values {column: new value}, and conditions that identify exactly which rows to change.
+- "delete / remove" -> query_type "delete" with conditions identifying the rows.
+Examples:
+Q: Add a new product called Wireless Mouse in the Accessories category priced at 19.99
+{"query_type": "insert", "tables": ["products"], "values": {"product_name": "Wireless Mouse", "category": "Accessories", "price": 19.99}}
+Q: Change the price of Laptop 1 to 999
+{"query_type": "update", "tables": ["products"], "values": {"price": 999}, "conditions": [{"column": "product_name", "operator": "=", "value": "Laptop 1", "table": "products"}]}
+"""
+
+_WRITE_WORDS = re.compile(
+    r"\b(add|insert|create|update|change|set|rename|delete|remove)\b",
+    re.IGNORECASE,
+)
+
+
+def build_system_prompt(question: str) -> str:
+    """The base prompt plus whichever optional guidance this question needs."""
+    prompt = SYSTEM_PROMPT
+    if _WRITE_WORDS.search(question):
+        prompt += "\n" + WRITE_GUIDANCE
+    return prompt
 
 
 def extract_intent(question: str, schema_context: dict) -> QueryIntent:
@@ -125,26 +260,16 @@ def extract_intent(question: str, schema_context: dict) -> QueryIntent:
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of rows to return"
+                },
+                "values": {
+                    "type": "object",
+                    "additionalProperties": True,
+                    "description": "For insert/update only: map of bare column name -> value to write. Only values the user actually stated."
                 }
             },
             "required": ["query_type", "tables"]
         }
     }
-
-    # Construct the prompt
-    system_prompt = """You are an expert at analyzing natural language database queries and extracting structured intent.
-Given a user's question and the database schema, identify:
-- What type of query it is (select, aggregate, count, filter, join, etc.)
-- Which tables and columns are involved
-- Any filtering conditions (WHERE clauses)
-- Aggregation functions needed
-- Grouping and sorting requirements
-- Date handling: resolve relative phrases ("last month", "this quarter", "yesterday") into concrete ISO dates (YYYY-MM-DD) using the current date below. BETWEEN requires a list of exactly two values, e.g. ["2026-08-01", "2026-08-31"]. Never pass a relative phrase as a condition value.
-- Concept mapping: if the question uses a concept with no matching column (e.g. "region" when the schema only has "country"), map it to the closest available column. If no close match exists, do not invent a column.
-- Computed metrics: express metrics like revenue as arithmetic over real columns (e.g. quantity * unit_price). The engine supports arithmetic expressions inside aggregations, so emit them directly, e.g. "SUM(order_items.quantity * order_items.unit_price)".
-
-
-Use the provided schema to ensure table and column names are valid."""
 
     user_prompt = f"""Database Schema:
 {schema_description}
@@ -155,23 +280,24 @@ Extract the structured query intent from this question."""
 
     try:
         # Call API with function calling (supports both Groq and OpenAI)
-        response = client.chat.completions.create(
-            model="qwen/qwen3.8-27b",  # Llama 3.1 8B - current Groq model
+        response = _create_completion_with_retry(
+            client,
+            model=LLM_MODEL,
             messages=[
-                {"role": "system", "content": system_prompt},
+                {"role": "system", "content": build_system_prompt(question)},
                 {"role": "user", "content": user_prompt}
             ],
             functions=[function_schema],
             function_call={"name": "extract_query_intent"},
             temperature=0.1,  # Low temperature for more deterministic outputs
-            max_tokens=800
+            max_tokens=LLM_MAX_TOKENS
         )
 
         # Extract the function call response
         message = response.choices[0].message
 
         if not message.function_call:
-            raise Exception("No function call in response")
+            raise IntentExtractionError("Error extracting intent: No function call in response")
 
         # Parse the function arguments
         intent_data = json.loads(message.function_call.arguments)
@@ -179,10 +305,12 @@ Extract the structured query intent from this question."""
         # Create and return QueryIntent object
         return QueryIntent(**intent_data)
 
+    except IntentExtractionError:
+        raise
     except json.JSONDecodeError as e:
-        raise Exception(f"Failed to parse intent data: {str(e)}")
+        raise IntentExtractionError(f"Failed to parse intent data: {str(e)}") from e
     except Exception as e:
-        raise Exception(f"Error extracting intent: {str(e)}")
+        raise IntentExtractionError(f"Error extracting intent: {str(e)}") from e
 
 
 def _format_schema_context(schema_context: dict) -> str:

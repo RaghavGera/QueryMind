@@ -20,6 +20,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+class WriteConflictError(Exception):
+    """A confirmed write no longer matches what the user was shown."""
+
+
 class DatabaseConfig:
     """Database configuration from environment variables."""
 
@@ -130,6 +134,58 @@ class Database:
                 else:
                     cur.execute(query)
                 return cur.fetchall()
+
+    def execute_write(
+        self,
+        query: str,
+        params: tuple = None,
+        expected_rows: int = None,
+    ) -> int:
+        """
+        Execute one INSERT or UPDATE in its own transaction.
+
+        Only reachable through a confirmed write (see app/writes.py). Guards
+        enforced here as defense in depth, independent of the caller:
+          * the statement must be a single INSERT or UPDATE
+          * an UPDATE must have a WHERE clause
+          * if ``expected_rows`` is given and the statement touches a
+            different number of rows, the transaction is rolled back
+
+        Returns:
+            Number of rows affected.
+
+        Raises:
+            ValueError: if the statement is not an allowed write
+            WriteConflictError: if the affected row count differs from
+                ``expected_rows`` (nothing is committed)
+        """
+        statement = query.strip().rstrip(";").strip()
+        keyword = statement.split(None, 1)[0].upper() if statement else ""
+        if keyword not in ("INSERT", "UPDATE"):
+            raise ValueError("Only INSERT and UPDATE statements can be executed as writes.")
+        if ";" in statement:
+            raise ValueError("Multiple statements are not allowed.")
+        if keyword == "UPDATE" and " WHERE " not in f" {statement.upper()} ":
+            raise ValueError("Refusing to run an UPDATE without a WHERE clause.")
+
+        conn = psycopg.connect(self.config.connection_string)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(statement, params or None)
+                affected = cur.rowcount
+            if expected_rows is not None and affected != expected_rows:
+                conn.rollback()
+                raise WriteConflictError(
+                    f"The statement would now affect {affected} row(s) instead of the "
+                    f"{expected_rows} previewed; nothing was changed."
+                )
+            conn.commit()
+            return affected
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
     def execute_single(self, query: str, params: tuple = None) -> Dict[str, Any]:
         """

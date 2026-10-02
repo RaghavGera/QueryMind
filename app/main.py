@@ -16,14 +16,19 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 import os
 
 from app.ambiguity_detector import AmbiguityDetector
-from app.database import Database, get_db, init_db
+from app import writes
+from app.database import Database, WriteConflictError, get_db, init_db
 from app.intent_converter import IntentConversionError, convert_query_intent
-from app.intent_extractor import extract_intent
+from app.intent_extractor import IntentExtractionError, extract_intent
+from app.models import QueryType
 from app.schema import DatabaseSchema, SchemaIntrospector
 from app.sql_generator import SQLGenerator
+
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -88,6 +93,35 @@ class QueryRequest(BaseModel):
     allow_full_table_write: bool = False
 
 
+def _error_response(
+    status_code: int,
+    message: str,
+    details: str | None = None,
+    **extra,
+) -> JSONResponse:
+    """
+    Structured error body. ``error`` is the human-readable message the
+    frontend shows; the empty ``result`` keeps the response shape stable.
+    """
+    content = {
+        "status": "error",
+        "error": message,
+        "result": {"columns": [], "rows": []},
+        **extra,
+    }
+    if details:
+        content["details"] = details
+    return JSONResponse(status_code=status_code, content=content)
+
+
+# How an LLM failure kind maps onto an honest HTTP status.
+_EXTRACTION_ERROR_STATUS = {
+    "rate_limited": (429, "The language model is rate limited right now. Please retry in a few seconds."),
+    "unavailable": (503, "The language model is temporarily unavailable. Please retry shortly."),
+    "invalid_response": (502, "Natural-language intent could not be extracted."),
+}
+
+
 @app.post("/query")
 async def run_query(
     request: QueryRequest,
@@ -109,16 +143,22 @@ async def run_query(
         )
 
     try:
+        return _run_pipeline(question, request, db)
+    except Exception as exc:  # Last-resort guard: never leak a traceback.
+        logger.exception("Unhandled error while answering %r", question)
+        return _error_response(
+            500,
+            "Something went wrong while processing the question.",
+            details=type(exc).__name__,
+        )
+
+
+def _run_pipeline(question: str, request: QueryRequest, db: Database):
+    try:
         schema = SchemaIntrospector(db).introspect()
     except Exception as exc:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "error": "Database schema could not be inspected.",
-                "details": str(exc),
-                "result": {"columns": [], "rows": []},
-            },
+        return _error_response(
+            500, "Database schema could not be inspected.", details=str(exc)
         )
 
     try:
@@ -126,15 +166,15 @@ async def run_query(
             question,
             _schema_context(schema)
         )
+    except IntentExtractionError as exc:
+        status_code, message = _EXTRACTION_ERROR_STATUS.get(
+            exc.kind, _EXTRACTION_ERROR_STATUS["invalid_response"]
+        )
+        extra = {"retry_after": exc.retry_after} if exc.retry_after else {}
+        return _error_response(status_code, message, details=str(exc), **extra)
     except Exception as exc:
-        return JSONResponse(
-            status_code=502,
-            content={
-                "status": "error",
-                "error": "Natural-language intent could not be extracted.",
-                "details": str(exc),
-                "result": {"columns": [], "rows": []},
-            },
+        return _error_response(
+            502, "Natural-language intent could not be extracted.", details=str(exc)
         )
 
     try:
@@ -144,14 +184,10 @@ async def run_query(
             schema=schema,
         )
     except IntentConversionError as exc:
-        return JSONResponse(
-            status_code=422,
-            content={
-                "status": "error",
-                "error": "The extracted intent could not be converted into a safe SQL plan.",
-                "details": str(exc),
-                "result": {"columns": [], "rows": []},
-            },
+        return _error_response(
+            422,
+            "The extracted intent could not be converted into a safe SQL plan.",
+            details=str(exc),
         )
 
     generator = SQLGenerator(
@@ -167,25 +203,36 @@ async def run_query(
 
     payload = generated.to_dict()
 
-    if (
-        generated.status.value in {
-            "success",
-            "success_with_warnings"
+    # Assumptions the converter made on the user's behalf (e.g. what "top
+    # products" was ranked by) are surfaced, never applied silently.
+    assumptions = structured_intent.recognized_entities.get("assumptions", [])
+    if assumptions:
+        payload["warnings"] = list(payload.get("warnings", [])) + list(assumptions)
+
+    succeeded = generated.status.value in {"success", "success_with_warnings"} and generated.sql
+
+    if succeeded and structured_intent.query_type in (QueryType.INSERT, QueryType.UPDATE):
+        return _prepare_write(structured_intent, generated, generator, payload, db)
+
+    if succeeded and structured_intent.query_type == QueryType.DELETE:
+        return {
+            **payload,
+            "status": "blocked",
+            "sql": None,
+            "params": [],
+            "error_message": "Deleting data through natural language is not supported.",
+            "result": {"columns": [], "rows": []},
         }
-        and generated.sql
-    ):
-        with open("generated_sql_debug.txt", "w", encoding="utf-8") as f:
-            f.write("SQL:\n")
-            f.write(generated.sql)
-            f.write("\n\nPARAMS:\n")
-            f.write(repr(generated.params))
+
+    if succeeded:
+        logger.debug("Generated SQL: %s | params: %r", generated.sql, generated.params)
         try:
             rows = db.execute_query(
                 generated.sql,
                 tuple(generated.params)
             )
         except Exception as exc:
-            payload = {
+            return {
                 "status": "error",
                 "error": "Generated SQL could not be executed.",
                 "details": str(exc),
@@ -193,7 +240,6 @@ async def run_query(
                 "params": generated.params,
                 "result": {"columns": [], "rows": []},
             }
-            return payload
 
         columns = (
             list(rows[0].keys())
@@ -213,6 +259,89 @@ async def run_query(
         }
 
     return payload
+
+
+def _prepare_write(intent, generated, generator, payload: dict, db: Database) -> dict:
+    """
+    Turn a generated INSERT/UPDATE into a confirmation request. Nothing is
+    executed here: the caller must POST the token to /query/confirm.
+    """
+    affected = None
+    if intent.query_type == QueryType.UPDATE:
+        count_sql, count_params = generator.build_affected_rows_sql(intent)
+        try:
+            affected = db.execute_query(count_sql, tuple(count_params))[0]["affected_rows"]
+        except Exception as exc:
+            return {
+                "status": "error",
+                "error": "Could not preview which rows would change.",
+                "details": str(exc),
+                "result": {"columns": [], "rows": []},
+            }
+        if affected == 0:
+            return {
+                "status": "error",
+                "error": "No rows match that description, so there is nothing to update.",
+                "sql": generated.sql,
+                "params": generated.params,
+                "result": {"columns": [], "rows": []},
+            }
+
+    payload["preview"] = writes.describe_write(intent, affected)
+    payload["result"] = {"columns": [], "rows": []}
+
+    if not writes.writes_enabled():
+        payload["status"] = "blocked"
+        payload["error_message"] = (
+            "Write queries are disabled on this deployment. This is the change that "
+            "would have been proposed; nothing was executed."
+        )
+        payload["writes_enabled"] = False
+        return payload
+
+    payload["status"] = "needs_confirmation"
+    payload["writes_enabled"] = True
+    payload["confirmation_token"] = writes.issue_token(
+        generated.sql,
+        generated.params,
+        expected_rows=1 if intent.query_type == QueryType.INSERT else affected,
+    )
+    payload["expires_in"] = writes.TOKEN_TTL_SECONDS
+    return payload
+
+
+class ConfirmRequest(BaseModel):
+    confirmation_token: str
+
+
+@app.post("/query/confirm")
+async def confirm_write(request: ConfirmRequest, db: Database = Depends(get_db)):
+    """Execute a previously previewed INSERT/UPDATE, exactly as shown."""
+    if not writes.writes_enabled():
+        return _error_response(403, "Write queries are disabled on this deployment.")
+
+    try:
+        authorized = writes.redeem_token(request.confirmation_token)
+    except writes.ConfirmationError as exc:
+        return _error_response(400, str(exc))
+
+    try:
+        affected = db.execute_write(
+            authorized["sql"],
+            tuple(authorized["params"]),
+            expected_rows=authorized["expected_rows"],
+        )
+    except WriteConflictError as exc:
+        return _error_response(409, str(exc))
+    except ValueError as exc:
+        return _error_response(400, str(exc))
+    except Exception as exc:
+        logger.exception("Confirmed write failed")
+        return _error_response(
+            500, "The database rejected the change.", details=str(exc).splitlines()[0][:300]
+        )
+
+    return {"status": "executed", "rows_affected": affected}
 
 
 @app.get("/health")

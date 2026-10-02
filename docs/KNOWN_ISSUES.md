@@ -1,0 +1,56 @@
+# Known issues log
+
+Source of truth for open problems and what was actually observed. Only
+measured results are recorded here; update the **Observed** column whenever a
+question is re-tested, and say which build (commit) it was tested against.
+
+## Sample questions (Build Plan §7)
+
+Retested live against `https://querymind-crln.onrender.com` on 2026-10-02,
+against the build deployed at commit `3eec66d` (before the Phase 1 changes).
+
+| Question | Observed (live, 2026-10-02) | State |
+|---|---|---|
+| How many new customers signed up last month? | `success`; `signup_date BETWEEN '2026-09-01' AND '2026-09-30'`; count `0` (data-dependent: the seed script dates customers relative to when it was run) | Fixed |
+| What were our top 10 products? | `success`; ranked by `SUM(order_items.quantity)`, 10 rows | Passed this run, but flaky before: the model sometimes returned `group_by` with no aggregation → `needs_clarification`. Phase 1 adds prompt rules + a deterministic fallback; see *Q2 variance* below |
+| Which region generated the most revenue? | `success`; India, `734561.0` | Fixed and verified |
+| Show customers whose spending increased this quarter | `needs_clarification` ("What aggregation do you want to perform?") | Feature gap — period-over-period (Phase 2) |
+
+## Found while building the Phase 1 eval harness (2026-10-02)
+
+| Issue | Evidence | State |
+|---|---|---|
+| **Case-sensitive text filters returned nothing.** Stored values are capitalised (`Cancelled`, `Completed`) but the model emits lowercase. | Live: "Show cancelled orders." → `WHERE status = 'cancelled'` → 0 rows; "total revenue from completed orders" → `NULL` | Fixed in code (text columns now compared with `LOWER()` / `ILIKE`); **needs a live re-check after deploy** |
+| **Vague terms were answered by guessing**, contradicting "ambiguity is a feature". | Offline run with the real LLM: "Show me expensive products." generated `price > %s` with an invented threshold; "Show me the top customers." silently ranked by spend; "Show me customers with high spending." did the same | Fixed in code (`app/vague_terms.py` + `AmbiguityDetector._check_vague_terms`); **needs a live re-check after deploy** |
+| Qualified condition columns (`customers.signup_date`) made the detector ask "which date column?" for "last month". | Offline run, 3/3 reproductions | Fixed in code (converter splits `table.column` in conditions) |
+| Aggregate conditions ("more than 5 orders") failed with `Invalid condition expression 'COUNT(orders.order_id)'`. | Offline eval, `gap-having-orders-over-5` | Fixed in code (HAVING support); **needs a live re-check after deploy** |
+
+## Still open
+
+| Issue | Notes |
+|---|---|
+| Date bucketing ("monthly revenue") | Generator has no `date_trunc`; question `gap-monthly-revenue` tracked as a `known_gap` in the eval set |
+| Nested aggregates ("average order value") | Needs AVG over a per-order SUM (subquery); `gap-average-order-value` |
+| Anti-joins ("customers who never ordered") | Needs `NOT EXISTS` / `LEFT JOIN … IS NULL`; `gap-never-ordered` |
+| Period-over-period comparisons | Phase 2 |
+| Natural-language INSERT/UPDATE | Phase 2 |
+
+## Owner actions the code cannot do (need your Render/Vercel access)
+
+1. **Rotate the Render PostgreSQL password.** It was pasted into a chat on
+   2026-09-29 and must be treated as compromised. In the Render dashboard:
+   rotate the DB credentials → update `DB_PASSWORD` on the backend service
+   (and `DB_USER` if it changed) → redeploy → confirm
+   `GET /health` returns `"status": "healthy"`. Do not paste the new value
+   anywhere except the Render env-var screen.
+2. **Confirm Render auto-deploys from `main`** (Service → Settings → Build &
+   Deploy → Auto-Deploy = *Yes*). If it is off, deploy manually after each push.
+3. **Confirm the Vercel project's Root Directory is `frontend/`.**
+   `frontend/vercel.json` (SPA rewrite) only takes effect if that is the root.
+   After deploy, hard-refresh `/app`, `/architecture` and `/developers` — each
+   should render instead of returning Vercel's 404.
+4. Optionally restrict the Render database's allowed inbound sources to the
+   backend service.
+
+Status of these as of 2026-10-02: `/health` is currently green on the old
+credentials; items 1–4 are **not yet done** (they require dashboard access).

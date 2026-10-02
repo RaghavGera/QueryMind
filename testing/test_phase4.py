@@ -175,7 +175,7 @@ def test_simple_select(schema) -> bool:
     ok = True
     ok &= check("status is SUCCESS", result.status == GenerationStatus.SUCCESS)
     ok &= check("SQL selects the right columns", '"first_name"' in result.sql and '"email"' in result.sql)
-    ok &= check("SQL filters on country", 'WHERE "country" = %s' in result.sql)
+    ok &= check("SQL filters on country", 'WHERE LOWER("country") = LOWER(%s)' in result.sql)
     ok &= check("param carries the filter value", result.params == ["India"])
     return ok
 
@@ -454,7 +454,7 @@ def test_in_and_between_operators(schema) -> bool:
 
     ok = True
     ok &= check("status is SUCCESS", result.status == GenerationStatus.SUCCESS)
-    ok &= check("IN clause has two placeholders", "IN (%s, %s)" in result.sql)
+    ok &= check("IN clause has two placeholders", "IN (LOWER(%s), LOWER(%s))" in result.sql)
     ok &= check("BETWEEN clause is present", "BETWEEN %s AND %s" in result.sql)
     ok &= check(
         "params contain both IN values and both BETWEEN values",
@@ -519,6 +519,8 @@ def main() -> None:
         print()
 
     print_summary(results)
+    if not all(results.values()):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

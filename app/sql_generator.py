@@ -69,6 +69,12 @@ _EXPRESSION_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-
 _EXPRESSION_SAFE_CHARS = re.compile(r"[\w.\s+\-*/()]+\Z")
 
 
+# Column types compared case-insensitively. Stored values are often
+# capitalised ('Cancelled', 'India') while users type 'cancelled' / 'india';
+# a case-sensitive '=' would silently return nothing.
+_TEXT_TYPES = {"character varying", "varchar", "character", "char", "text", "citext", "name"}
+
+
 class GenerationStatus(str, Enum):
     """Outcome of a SQL generation attempt."""
     SUCCESS = "success"                        # Clean generation, nothing to flag
@@ -224,6 +230,21 @@ class SQLGenerator:
                 error_message=str(exc),
                 ambiguity_result=ambiguity_result,
             )
+
+        # 3b. An INSERT missing a required value is a question, not an error.
+        if working_intent.query_type == QueryType.INSERT:
+            missing = self._missing_required_columns(working_intent)
+            if missing:
+                table = working_intent.tables[0]
+                return SQLGenerationResult(
+                    status=GenerationStatus.NEEDS_CLARIFICATION,
+                    warnings=warnings,
+                    clarification_questions=[
+                        f"What value should '{column}' have for the new {table} row?"
+                        for column in missing
+                    ],
+                    ambiguity_result=ambiguity_result,
+                )
 
         # 4. Build the actual SQL.
         try:
@@ -381,17 +402,62 @@ class SQLGenerator:
                 validate_reference(aggregation.column, "aggregation", allow_expression=True)
         for order in intent.order_by:
             validate_reference(order.column, "ORDER BY", allow_aggregate=True)
-        for condition in intent.conditions + intent.having_conditions:
+        for condition in intent.conditions:
             validate_reference(
                 f"{condition.table}.{condition.column}" if condition.table else condition.column,
                 "condition",
             )
+        for condition in intent.having_conditions:
+            validate_reference(
+                f"{condition.table}.{condition.column}" if condition.table else condition.column,
+                "HAVING condition",
+                allow_aggregate=True,
+            )
+
+        if intent.query_type in (QueryType.INSERT, QueryType.UPDATE):
+            if len(intent.tables) != 1:
+                raise SQLGenerationError(
+                    f"{intent.query_type.value} must target exactly one table, got {len(intent.tables)}."
+                )
+            target = intent.tables[0]
+            values = intent.insert_values if intent.query_type == QueryType.INSERT else intent.update_values
+            if target in self.schema.tables:
+                for column in values or {}:
+                    if column not in self.schema.tables[target].columns:
+                        raise SQLGenerationError(
+                            f"Column '{target}.{column}' does not exist in the schema."
+                        )
 
         for join in intent.joins:
             if join.left_column not in self.schema.tables[join.left_table].columns:
                 raise SQLGenerationError(f"Column '{join.left_table}.{join.left_column}' in JOIN does not exist in the schema.")
             if join.right_column not in self.schema.tables[join.right_table].columns:
                 raise SQLGenerationError(f"Column '{join.right_table}.{join.right_column}' in JOIN does not exist in the schema.")
+
+    def _missing_required_columns(self, intent: StructuredIntent) -> List[str]:
+        """NOT NULL columns with no default that an INSERT did not supply."""
+        table = self.schema.tables.get(intent.tables[0]) if intent.tables else None
+        if table is None:
+            return []
+        provided = set(intent.insert_values or {})
+        missing = []
+        for name, column in table.columns.items():
+            if name in provided or column.is_nullable or column.default_value is not None:
+                continue
+            if column.is_primary_key and column.data_type.lower() in {"integer", "bigint", "smallint"}:
+                continue  # auto-generated key
+            missing.append(name)
+        return missing
+
+    def build_affected_rows_sql(self, intent: StructuredIntent) -> Tuple[str, List[Any]]:
+        """SELECT COUNT(*) over the rows an UPDATE would touch (for the preview)."""
+        table = intent.tables[0]
+        sql = f"SELECT COUNT(*) AS {self._quote_ident('affected_rows')}\nFROM {self._quote_ident(table)}"
+        params: List[Any] = []
+        if intent.conditions:
+            where_sql, params = self._build_condition_clause(intent.conditions, [table])
+            sql += f"\nWHERE {where_sql}"
+        return sql, params
 
     # ------------------------------------------------------------------ #
     # SQL construction
@@ -438,7 +504,9 @@ class SQLGenerator:
                 joined_tables.add(join.alias)
 
         if intent.conditions:
-            where_sql, where_params = self._build_condition_clause(intent.conditions)
+            where_sql, where_params = self._build_condition_clause(
+                intent.conditions, self._intent_tables(intent)
+            )
             sql += f"\nWHERE {where_sql}"
             params.extend(where_params)
 
@@ -446,7 +514,9 @@ class SQLGenerator:
             sql += f"\nGROUP BY {', '.join(self._qualify(c) for c in intent.group_by)}"
 
         if intent.having_conditions:
-            having_sql, having_params = self._build_condition_clause(intent.having_conditions)
+            having_sql, having_params = self._build_condition_clause(
+                intent.having_conditions, self._intent_tables(intent)
+            )
             sql += f"\nHAVING {having_sql}"
             params.extend(having_params)
 
@@ -497,7 +567,7 @@ class SQLGenerator:
         sql = f"UPDATE {self._quote_ident(table)}\nSET {', '.join(set_parts)}"
 
         if intent.conditions:
-            where_sql, where_params = self._build_condition_clause(intent.conditions)
+            where_sql, where_params = self._build_condition_clause(intent.conditions, [table])
             sql += f"\nWHERE {where_sql}"
             params.extend(where_params)
 
@@ -515,7 +585,7 @@ class SQLGenerator:
         params: List[Any] = []
 
         if intent.conditions:
-            where_sql, where_params = self._build_condition_clause(intent.conditions)
+            where_sql, where_params = self._build_condition_clause(intent.conditions, [table])
             sql += f"\nWHERE {where_sql}"
             params.extend(where_params)
 
@@ -592,12 +662,32 @@ class SQLGenerator:
         expression = self._parse_aggregate_expression(value)
         return expression if expression else self._qualify(value)
 
-    def _build_condition_clause(self, conditions: List[Condition]) -> Tuple[str, List[Any]]:
+    def _intent_tables(self, intent: StructuredIntent) -> List[str]:
+        tables = list(intent.tables)
+        for join in intent.joins:
+            for table in (join.left_table, join.right_table):
+                if table not in tables:
+                    tables.append(table)
+        return tables
+
+    def _is_text_column(self, cond: Condition, tables: Optional[List[str]]) -> bool:
+        """True if the condition's column resolves to text column(s) only."""
+        candidates = [cond.table] if cond.table else (tables or [])
+        types = {
+            self.schema.tables[t].columns[cond.column].data_type.lower()
+            for t in candidates
+            if t in self.schema.tables and cond.column in self.schema.tables[t].columns
+        }
+        return bool(types) and types <= _TEXT_TYPES
+
+    def _build_condition_clause(
+        self, conditions: List[Condition], tables: Optional[List[str]] = None
+    ) -> Tuple[str, List[Any]]:
         fragments: List[str] = []
         params: List[Any] = []
 
         for i, cond in enumerate(conditions):
-            frag, cond_params = self._render_condition(cond)
+            frag, cond_params = self._render_condition(cond, tables)
             fragments.append(frag)
             params.extend(cond_params)
             if i < len(conditions) - 1:
@@ -605,21 +695,37 @@ class SQLGenerator:
 
         return " ".join(fragments), params
 
-    def _render_condition(self, cond: Condition) -> Tuple[str, List[Any]]:
-        col = self._qualify(f"{cond.table}.{cond.column}" if cond.table else cond.column)
+    def _render_condition(
+        self, cond: Condition, tables: Optional[List[str]] = None
+    ) -> Tuple[str, List[Any]]:
+        # HAVING conditions compare an aggregate, e.g. COUNT("orders"."order_id") > %s
+        col = self._parse_aggregate_expression(cond.column) or self._qualify(
+            f"{cond.table}.{cond.column}" if cond.table else cond.column
+        )
         op = cond.operator
 
         if op in (ConditionOperator.IS_NULL, ConditionOperator.IS_NOT_NULL):
             return f"{col} {op.value}", []
 
+        text_column = self._is_text_column(cond, tables)
+
         if op in (ConditionOperator.IN, ConditionOperator.NOT_IN):
             values = cond.value if isinstance(cond.value, list) else [cond.value]
+            if text_column and all(isinstance(v, str) for v in values):
+                placeholders = ", ".join(["LOWER(%s)"] * len(values))
+                return f"LOWER({col}) {op.value} ({placeholders})", list(values)
             placeholders = ", ".join(["%s"] * len(values))
             return f"{col} {op.value} ({placeholders})", list(values)
 
         if op == ConditionOperator.BETWEEN:
             values = cond.value
             return f"{col} BETWEEN %s AND %s", [values[0], values[1]]
+
+        if text_column and isinstance(cond.value, str):
+            if op in (ConditionOperator.EQUALS, ConditionOperator.NOT_EQUALS):
+                return f"LOWER({col}) {op.value} LOWER(%s)", [cond.value]
+            if op in (ConditionOperator.LIKE, ConditionOperator.NOT_LIKE):
+                return f"{col} {'ILIKE' if op == ConditionOperator.LIKE else 'NOT ILIKE'} %s", [cond.value]
 
         return f"{col} {op.value} %s", [cond.value]
 
