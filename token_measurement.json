@@ -510,5 +510,133 @@
     "after": 1078,
     "provider": "gemini-lite",
     "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which country generates the most revenue?",
+    "trimmed": false,
+    "before": 943,
+    "after": 943,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What percentage of orders are completed?",
+    "trimmed": true,
+    "before": 943,
+    "after": 914,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show the number of orders for each month.",
+    "trimmed": true,
+    "before": 1118,
+    "after": 1089,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show monthly revenue and order count.",
+    "trimmed": false,
+    "before": 1116,
+    "after": 1116,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "For each category, show the number of products, average price, and total revenue.",
+    "trimmed": true,
+    "before": 953,
+    "after": 918,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Find customers who have never placed an order.",
+    "trimmed": true,
+    "before": 945,
+    "after": 916,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Give me the biggest spenders.",
+    "trimmed": false,
+    "before": 943,
+    "after": 943,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What are our best-selling products?",
+    "trimmed": true,
+    "before": 944,
+    "after": 909,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show me cheap electronics.",
+    "trimmed": false,
+    "before": 941,
+    "after": 941,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Who buys the most stuff?",
+    "trimmed": false,
+    "before": 942,
+    "after": 942,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which products make us the most money?",
+    "trimmed": true,
+    "before": 944,
+    "after": 909,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show me our customers from India.",
+    "trimmed": true,
+    "before": 943,
+    "after": 875,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What are the most popular categories?",
+    "trimmed": false,
+    "before": 943,
+    "after": 943,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Give me the recent orders.",
+    "trimmed": true,
+    "before": 942,
+    "after": 913,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Who hasn't bought anything?",
+    "trimmed": false,
+    "before": 943,
+    "after": 943,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which customers are spending the most?",
+    "trimmed": false,
+    "before": 943,
+    "after": 943,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
   }
 ]
