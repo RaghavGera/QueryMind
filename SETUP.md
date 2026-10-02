@@ -267,9 +267,12 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | Variable | Required | Notes |
 |---|---|---|
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | yes | Set **all five**. Setting only `DATABASE_URL` is ignored and silently falls back to `localhost:5432` (this caused an outage once). |
-| `GROQ_API_KEY` / `MISTRAL_API_KEY` / `GEMINI_API_KEY` / `OPENAI_API_KEY` | one of them | The provider is inferred from whichever key is set. |
-| `LLM_PROVIDER` | no | `groq` (default if only `GROQ_API_KEY` is set), `mistral`, `gemini` or `openai`. |
-| `QUERYMIND_LLM_MODEL` | no (required for `gemini`) | Overrides the provider's default model. |
+| `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY` | at least one | Every provider with a key joins the failover chain; providers without a key are skipped silently. |
+| `LLM_PROVIDER_ORDER` | no | Try order, default `gemini,mistral,groq,openai`. Unknown names are ignored. |
+| `GEMINI_MODEL` | no | Default `gemini-2.5-flash`. |
+| `MISTRAL_MODEL` | no | Default `mistral-small-latest`. |
+| `GROQ_MODEL` | no | Default `qwen/qwen3.8-27b`. Older copies of `.env.example` suggested `llama-3.1-70b-versatile`; make sure a stale value is not set. |
+| `OPENAI_MODEL` | no | Default `gpt-4o-mini`. |
 | `BACKEND_CORS_ORIGINS` | no | Comma-separated; defaults include `http://localhost:5173` and the Vercel URL. |
 | `QUERYMIND_ENABLE_WRITES` | no | `true` allows confirmed natural-language INSERT/UPDATE. **Off by default** - leave it off on a public demo database. |
 | `QUERYMIND_CONFIRM_SECRET` | with writes | Long random string; keeps confirmation tokens valid across restarts/instances. |
@@ -278,14 +281,53 @@ Frontend (Vercel project settings): `VITE_API_BASE_URL` = the backend URL.
 The Vercel project's **Root Directory must be `frontend/`** so `frontend/vercel.json`
 (the SPA rewrite for `/app`, `/architecture`, `/developers`) takes effect.
 
-## LLM provider and rate limits
+## LLM providers, failover and rate limits
 
-All LLM calls go through `app/openai_client.py` (OpenAI-compatible protocol, using
-the standard `tools` / `tool_choice` API). `max_tokens` is pinned at 800.
-Groq's free tier for the current key is 8,000 tokens/minute and 1,000
-requests/day, so the extractor keeps its prompt small (about 830 tokens for a typical
-question) and retries 429/5xx with backoff. After switching provider, run the
-eval harness (below) before trusting it: `python -m testing.eval_harness --offline`.
+All LLM calls go through `app/openai_client.py`. Providers are tried in
+`LLM_PROVIDER_ORDER`; each request uses the standard `tools` API (`tool_choice`
+is `auto` for Gemini, `any` for Mistral, `required` for Groq/OpenAI, matching
+what each documents) and `max_tokens=800` for every provider.
+
+Failover policy per request (`_create_completion_with_retry` in `app/intent_extractor.py`):
+
+| Provider response | What happens |
+|---|---|
+| 429 mentioning a daily quota (tokens/requests per day, TPD/RPD, "daily") | Provider is parked for the time it reports ("try again in 3m53s"; default 15 min) and the next provider is tried immediately. No retry. |
+| 429 per-minute | One retry after `Retry-After` (or ~1 s); if `Retry-After` is over 8 s, no wait. Then the next provider. |
+| 5xx, timeout (30 s), connection error | Next provider. |
+| Other 4xx (bad key, unknown model, rejected request) or an unusable answer | Next provider, so one misconfigured provider cannot take `/query` down. |
+
+`/query` returns 429 only when every configured provider is rate limited or
+parked, 503 when they failed for a mix of reasons, 502 when none returned a
+usable intent. The OpenAI SDK's own automatic retries are disabled
+(`max_retries=0`) so they cannot stack under this policy. Each served request
+logs `provider`, `model`, `prompt_tokens` and `completion_tokens`.
+
+Measured on 2026-10-02: Groq's free tier for this project's key is 8,000
+tokens/minute, 1,000 requests/day and 200,000 tokens/day; one extraction
+request ("What were our top 10 products?", schema trimmed to 2 tables) used 1,028 prompt + 139 completion
+tokens, so the daily token cap allows roughly 170 questions.
+
+**Render:** after deploying, set `GEMINI_API_KEY` and/or `MISTRAL_API_KEY` on the
+service. Providers without a key are skipped silently, so without them the
+chain is Groq only.
+
+### Prompt size
+
+Only the tables relevant to the question are sent: `EntityRecognizer` finds
+the tables (or columns) the question names, metric words such as "revenue"
+add the tables that hold quantity/price columns, and every table one foreign
+key away is added. If nothing is recognised the full schema is sent. Request
+validation still uses the full schema. To see the decision for every
+question in `testing/test_questions.txt` without calling an API:
+
+```bash
+python -m testing.measure_prompt_tokens --dry-run
+python -m testing.measure_prompt_tokens --provider gemini   # real usage.prompt_tokens, spends quota
+```
+
+After switching provider, run the eval harness before trusting it:
+`python -m testing.eval_harness --offline`.
 
 ## Running locally
 
@@ -299,12 +341,13 @@ cd frontend && npm install && npm run dev   # frontend on :5173
 
 ```bash
 pip install pytest
-python -m testing.run_tests            # every offline suite (no DB, no network)
-python -m testing.run_tests --live     # also test_phase1/2 (need a DB / API key)
+pytest testing/                        # everything; no LLM tokens are spent
+python -m testing.run_tests --live     # also the tests that call a real LLM provider
 ```
 
-The files in `testing/` mix pytest files and standalone scripts, so use the
-runner rather than `pytest testing/`.
+`testing/conftest.py` lets pytest run the older script-style suites too (they
+can still be run directly, e.g. `python -m testing.test_phase4`). Tests that
+need PostgreSQL are skipped when the database is unreachable.
 
 ## Eval harness
 

@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   database), checks HTTP status, response status, SQL shape, row counts and cells, repeats
   runs to expose model variance, and exits non-zero on any core failure. Questions tagged
   `known_gap` are reported but do not fail the run.
-- `python -m testing.run_tests` runs every offline suite the way each is meant to be run.
+- `pytest testing/` runs every suite, including the older script-style ones
+  (`testing/conftest.py`); `python -m testing.run_tests --live` adds the token-spending tests.
 - HAVING support: conditions on aggregates ("more than 5 orders") become `HAVING` clauses.
 - Anti-joins: "customers who never ordered" renders `LEFT JOIN ... IS NULL`.
 - **Natural-language INSERT/UPDATE** with a mandatory confirmation step. `/query` never
@@ -33,8 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allow-listed units, schema-validated column).
 - Frontend: confirmation panel for writes (preview, Confirm/Cancel), backend `warnings` /
   assumptions shown to the user, `blocked` responses without questions shown as messages.
-- Provider-agnostic LLM client (`LLM_PROVIDER`: groq, mistral, gemini, openai; Groq remains the
-  default) using the standard `tools` / `tool_choice` API; `QUERYMIND_LLM_MODEL` override.
+- **LLM provider failover chain**: Gemini (Google AI Studio), Mistral, Groq and OpenAI, tried in
+  `LLM_PROVIDER_ORDER` (default `gemini,mistral,groq,openai`); providers without a key are skipped.
+  A daily-quota 429 parks the provider and fails over immediately; a per-minute 429 gets one short
+  retry; 5xx/timeouts/other 4xx fail over. `/query` returns 429 only when every provider is rate
+  limited. Per-provider model overrides `GEMINI_MODEL`, `MISTRAL_MODEL`, `GROQ_MODEL`, `OPENAI_MODEL`.
+  Each served request logs provider, model, `prompt_tokens` and `completion_tokens`.
+- **Per-question schema trimming**: only the tables `EntityRecognizer` finds, plus metric tables and
+  foreign-key neighbours, are sent to the LLM; full schema when nothing is recognised. Validation
+  still uses the full schema. `python -m testing.measure_prompt_tokens` measures the effect.
+- Extraction uses the standard `tools` API (Mistral and Gemini do not document the legacy
+  `functions` parameter).
 - Required-column check for INSERT: missing NOT NULL values become clarification questions.
 - `docs/KNOWN_ISSUES.md`: observed behaviour per question, owner actions, open gaps.
 
@@ -46,11 +56,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extractor prompt is pinned in a module constant with two few-shot examples; guidance and
   function-schema slots for writes, comparisons, per-group ranking, nested aggregates, time
   grouping and HAVING are added only for questions that need them, and the schema listing is
-  compact (~830 tokens for a typical question). Groq's free tier is 8,000 tokens/minute.
+  compact. Measured with schema trimming on: 1,028 prompt + 139 completion tokens for "What were
+  our top 10 products?". Groq's free tier for this key is 8,000 tokens/minute and 200,000 tokens/day.
 - Text comparisons (`=`, `!=`, `IN`, `LIKE`) on text columns are case-insensitive.
 - `execute_query` debug-file write on every request replaced by `logging`.
 
 ### Fixed
+- Hidden retry stacking: the OpenAI SDK retried 429/5xx twice on its own (honouring Retry-After)
+  underneath the app's retries, and waited up to 10 minutes per request. SDK retries are now off
+  and requests time out after 30 s.
 - **Silent wrong answers from case-sensitive filters**: "Show cancelled orders" returned 0
   rows because values are stored as `Cancelled`.
 - **Guessed answers to vague questions**: "expensive products", "recent orders",

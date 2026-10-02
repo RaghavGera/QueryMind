@@ -51,6 +51,14 @@ against the build deployed at commit `3eec66d` (before the Phase 1 changes).
    should render instead of returning Vercel's 404.
 4. Optionally restrict the Render database's allowed inbound sources to the
    backend service.
+5. **Add failover LLM keys on Render** (`GEMINI_API_KEY`, `MISTRAL_API_KEY`).
+   The provider chain skips providers without a key *silently*, so until they
+   are set the backend is Groq-only and a Groq daily-quota hit (200K tokens/day,
+   observed 2026-10-02) still takes `/query` down.
+6. **Check `GROQ_MODEL` on Render.** The code now honours it. Old copies of
+   `.env.example` suggested `llama-3.1-70b-versatile`; if that stale value is
+   set, Groq requests will use (or fail on) that model. Unset it to use the
+   default `qwen/qwen3.8-27b`.
 
 Status of these as of 2026-10-02: `/health` is currently green on the old
 credentials; items 1–4 are **not yet done** (they require dashboard access).
