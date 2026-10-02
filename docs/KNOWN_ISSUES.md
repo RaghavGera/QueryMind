@@ -14,7 +14,7 @@ against the build deployed at commit `3eec66d` (before the Phase 1 changes).
 | How many new customers signed up last month? | `success`; `signup_date BETWEEN '2026-09-01' AND '2026-09-30'`; count `0` (data-dependent: the seed script dates customers relative to when it was run) | Fixed |
 | What were our top 10 products? | `success`; ranked by `SUM(order_items.quantity)`, 10 rows | Passed this run, but flaky before: the model sometimes returned `group_by` with no aggregation → `needs_clarification`. Phase 1 adds prompt rules + a deterministic fallback; see *Q2 variance* below |
 | Which region generated the most revenue? | `success`; India, `734561.0` | Fixed and verified |
-| Show customers whose spending increased this quarter | `needs_clarification` ("What aggregation do you want to perform?") | Feature gap — period-over-period (Phase 2) |
+| Show customers whose spending increased this quarter | `needs_clarification` ("What aggregation do you want to perform?"). Re-run live later on 2026-10-02 (still `4b50c56`): `error`, "Invalid aggregation expression 'CASE WHEN orders.order_date BETWEEN '2026-07-01' AND '2026-09-30' THEN … ELSE 0 END'" — the old build has no comparison slot, so the model hand-writes a CASE | Fixed in code (`af68250`, `comparison` slot → generated current-vs-previous query). Local run 2026-10-02 on gemini-3.1-flash-lite: `success`, 3/3 extractions correct; 0 rows because the local data has no orders after 2026-08-25 ("last quarter" variant: 95 rows). **Needs a live re-check after deploy** |
 
 ## Found while building the Phase 1 eval harness (2026-10-02)
 
