@@ -638,5 +638,165 @@
     "after": 943,
     "provider": "gemini-lite",
     "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show me the top customers.",
+    "trimmed": true,
+    "before": 942,
+    "after": 874,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show me the best products.",
+    "trimmed": true,
+    "before": 942,
+    "after": 876,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show me recent orders.",
+    "trimmed": true,
+    "before": 941,
+    "after": 912,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show me expensive products.",
+    "trimmed": true,
+    "before": 941,
+    "after": 875,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show me successful orders.",
+    "trimmed": true,
+    "before": 941,
+    "after": 912,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show me customers with high spending.",
+    "trimmed": false,
+    "before": 943,
+    "after": 943,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show me popular products.",
+    "trimmed": true,
+    "before": 941,
+    "after": 875,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show me sales from last month.",
+    "trimmed": false,
+    "before": 943,
+    "after": 943,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which 10 customers spent the most on completed orders, and how much did each spend?",
+    "trimmed": false,
+    "before": 955,
+    "after": 955,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "What were the top 5 products by revenue in each category?",
+    "trimmed": true,
+    "before": 1225,
+    "after": 1190,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which countries generated the most revenue from completed orders?",
+    "trimmed": false,
+    "before": 946,
+    "after": 946,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show the monthly revenue from completed orders for the last 12 months.",
+    "trimmed": false,
+    "before": 1124,
+    "after": 1124,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Find customers who placed at least 3 orders and spent more than 1,000 in total.",
+    "trimmed": false,
+    "before": 1118,
+    "after": 1118,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Show the top 10 products by quantity sold along with their category and total revenue.",
+    "trimmed": true,
+    "before": 954,
+    "after": 919,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "For every customer, show their number of orders, total quantity purchased, and total spending.",
+    "trimmed": false,
+    "before": 954,
+    "after": 954,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which customers have never placed an order?",
+    "trimmed": true,
+    "before": 944,
+    "after": 915,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Which products have never been ordered?",
+    "trimmed": true,
+    "before": 943,
+    "after": 908,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "For each category, show the number of products, average product price, quantity sold, and total revenue.",
+    "trimmed": true,
+    "before": 957,
+    "after": 922,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Find the customer who spent the most money and show their name, country, number of orders, and total spending.",
+    "trimmed": false,
+    "before": 959,
+    "after": 959,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
+  },
+  {
+    "question": "Compare completed, cancelled, and pending orders by count and total revenue.",
+    "trimmed": false,
+    "before": 950,
+    "after": 950,
+    "provider": "gemini-lite",
+    "model": "gemini-3.1-flash-lite"
   }
 ]
