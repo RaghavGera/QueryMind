@@ -192,6 +192,22 @@ def create_mock_intent_from_question(question: str, schema) -> StructuredIntent:
     )
 
 
+# Real-world questions to test (module level so pytest can parametrize
+# test_question over them; see testing/conftest.py).
+QUESTIONS = [
+    "How many new customers did we get last month?",
+    "What were our sales last month?",
+    "Who are our best customers?",
+    "Which products are performing well?",
+    "Which customers are inactive?",
+    "What is our conversion rate?",
+    "How much revenue did Electronics generate?",
+    "Which country is doing the best?",
+    "Do repeat customers spend more?",
+    "What is our return rate?",
+]
+
+
 def test_question(detector: AmbiguityDetector, question: str, schema, question_num: int):
     """Test a single question for ambiguities."""
     print("=" * 80)
@@ -300,19 +316,7 @@ def main():
     print(f"✓ Loaded schema: {len(schema.tables)} tables")
     print()
 
-    # Real-world questions to test
-    questions = [
-        "How many new customers did we get last month?",
-        "What were our sales last month?",
-        "Who are our best customers?",
-        "Which products are performing well?",
-        "Which customers are inactive?",
-        "What is our conversion rate?",
-        "How much revenue did Electronics generate?",
-        "Which country is doing the best?",
-        "Do repeat customers spend more?",
-        "What is our return rate?"
-    ]
+    questions = QUESTIONS
 
     # Test each question
     for i, question in enumerate(questions, 1):
