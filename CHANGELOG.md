@@ -34,17 +34,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   allow-listed units, schema-validated column).
 - Frontend: confirmation panel for writes (preview, Confirm/Cancel), backend `warnings` /
   assumptions shown to the user, `blocked` responses without questions shown as messages.
-- **LLM provider failover chain**: Gemini (Google AI Studio), Mistral, Groq and OpenAI, tried in
-  `LLM_PROVIDER_ORDER` (default `gemini,mistral,groq,openai`); providers without a key are skipped.
+- **LLM provider failover chain**: Gemini (Google AI Studio) then Groq, tried in
+  `LLM_PROVIDER_ORDER` (default `gemini,groq`); a provider without a key is skipped. Both are free
+  without a payment method (Mistral and Cerebras were dropped because they require one).
   A daily-quota 429 parks the provider and fails over immediately; a per-minute 429 gets one short
   retry; 5xx/timeouts/other 4xx fail over. `/query` returns 429 only when every provider is rate
-  limited. Per-provider model overrides `GEMINI_MODEL`, `MISTRAL_MODEL`, `GROQ_MODEL`, `OPENAI_MODEL`.
+  limited. Per-provider model overrides `GEMINI_MODEL`, `GROQ_MODEL`.
   Each served request logs provider, model, `prompt_tokens` and `completion_tokens`.
 - **Per-question schema trimming**: only the tables `EntityRecognizer` finds, plus metric tables and
   foreign-key neighbours, are sent to the LLM; full schema when nothing is recognised. Validation
   still uses the full schema. `python -m testing.measure_prompt_tokens` measures the effect.
-- Extraction uses the standard `tools` API (Mistral and Gemini do not document the legacy
-  `functions` parameter).
+- Extraction uses the standard `tools` API (Gemini's OpenAI-compatible layer does not document the
+  legacy `functions` parameter).
 - Required-column check for INSERT: missing NOT NULL values become clarification questions.
 - `docs/KNOWN_ISSUES.md`: observed behaviour per question, owner actions, open gaps.
 
@@ -60,6 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   our top 10 products?". Groq's free tier for this key is 8,000 tokens/minute and 200,000 tokens/day.
 - Text comparisons (`=`, `!=`, `IN`, `LIKE`) on text columns are case-insensitive.
 - `execute_query` debug-file write on every request replaced by `logging`.
+
+### Removed
+- OpenAI as an LLM provider: `OPENAI_API_KEY` (previously a fallback when no Groq key was set) is
+  no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
 - Hidden retry stacking: the OpenAI SDK retried 429/5xx twice on its own (honouring Retry-After)

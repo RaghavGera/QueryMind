@@ -243,7 +243,7 @@ DB_NAME=text_to_sql
 GROQ_API_KEY=your_groq_api_key_here
 # Optional: override the model (default: qwen/qwen3.8-27b)
 # GROQ_MODEL=qwen/qwen3.8-27b
-# Gemini and Mistral can be added as failover providers - see SETUP.md
+# Gemini (Google AI Studio) can be added as a failover provider - see SETUP.md
 ```
 
 ### API Keys

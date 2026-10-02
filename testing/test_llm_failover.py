@@ -52,7 +52,7 @@ def test_provider_1_rate_limited_succeeds_on_provider_2(monkeypatch, sleeps, cap
     """(a) provider-1 429 -> answered by provider-2."""
     first = FakeCompletions(errors=[rate_limit_error(), rate_limit_error()])
     second = FakeCompletions(usage=Usage(prompt_tokens=321, completion_tokens=54))
-    use_providers(monkeypatch, gemini=first, mistral=second)
+    use_providers(monkeypatch, gemini=first, groq=second)
 
     with caplog.at_level(logging.INFO, logger="app.intent_extractor"):
         intent = _ask()
@@ -63,7 +63,7 @@ def test_provider_1_rate_limited_succeeds_on_provider_2(monkeypatch, sleeps, cap
     assert len(sleeps) == 1
     served = [r.getMessage() for r in caplog.records if "LLM request served" in r.getMessage()]
     assert served == [
-        "LLM request served provider=mistral model=mistral-test-model prompt_tokens=321 completion_tokens=54"
+        "LLM request served provider=groq model=groq-test-model prompt_tokens=321 completion_tokens=54"
     ]
 
 
@@ -71,7 +71,7 @@ def test_daily_quota_fails_over_immediately_without_retry(monkeypatch, sleeps):
     """(b) TPD-style 429 -> no retry loop, provider parked, straight to the next one."""
     first = FakeCompletions(errors=[daily_quota_error()])
     second = FakeCompletions()
-    use_providers(monkeypatch, groq=first, mistral=second)
+    use_providers(monkeypatch, gemini=first, groq=second)
 
     _ask()
 
@@ -90,19 +90,19 @@ def test_daily_quota_fails_over_immediately_without_retry(monkeypatch, sleeps):
 # ---------------------------------------------------------------------- #
 
 def test_daily_quota_cooldown_comes_from_the_providers_hint(monkeypatch, sleeps):
-    use_providers(monkeypatch, groq=FakeCompletions(errors=[daily_quota_error("3m53.28s")]),
-                  mistral=FakeCompletions())
+    use_providers(monkeypatch, gemini=FakeCompletions(errors=[daily_quota_error("3m53.28s")]),
+                  groq=FakeCompletions())
     _ask()
-    remaining = client_module._exhausted_until["groq"] - client_module.time.monotonic()
+    remaining = client_module._exhausted_until["gemini"] - client_module.time.monotonic()
     assert remaining == pytest.approx(233.28, abs=5)
 
 
 def test_parked_provider_is_tried_again_after_its_cooldown(monkeypatch, sleeps):
     first = FakeCompletions(errors=[daily_quota_error("10s")])
-    use_providers(monkeypatch, groq=first, mistral=FakeCompletions())
+    use_providers(monkeypatch, gemini=first, groq=FakeCompletions())
     _ask()
 
-    client_module._exhausted_until["groq"] = client_module.time.monotonic() - 1  # cooldown over
+    client_module._exhausted_until["gemini"] = client_module.time.monotonic() - 1  # cooldown over
     _ask()
     assert first.calls == 2
 
@@ -129,8 +129,7 @@ def test_all_providers_rate_limited_raises_rate_limited(monkeypatch, sleeps):
     use_providers(
         monkeypatch,
         gemini=FakeCompletions(errors=[daily_quota_error("1h2m3s")]),
-        mistral=FakeCompletions(errors=[rate_limit_error("2"), rate_limit_error("2")]),
-        groq=FakeCompletions(errors=[daily_quota_error("5m")]),
+        groq=FakeCompletions(errors=[rate_limit_error("2"), rate_limit_error("2")]),
     )
 
     with pytest.raises(IntentExtractionError) as excinfo:
@@ -143,7 +142,7 @@ def test_all_providers_rate_limited_raises_rate_limited(monkeypatch, sleeps):
 def test_when_every_provider_is_parked_no_call_is_made(monkeypatch, sleeps):
     first = FakeCompletions(errors=[daily_quota_error("10m")])
     second = FakeCompletions(errors=[daily_quota_error("4m")])
-    use_providers(monkeypatch, groq=first, mistral=second)
+    use_providers(monkeypatch, gemini=first, groq=second)
     with pytest.raises(IntentExtractionError):
         _ask()
 
@@ -158,7 +157,7 @@ def test_when_every_provider_is_parked_no_call_is_made(monkeypatch, sleeps):
 def test_long_retry_after_fails_over_without_waiting(monkeypatch, sleeps):
     first = FakeCompletions(errors=[rate_limit_error(retry_after="45")])
     second = FakeCompletions()
-    use_providers(monkeypatch, gemini=first, mistral=second)
+    use_providers(monkeypatch, gemini=first, groq=second)
 
     _ask()
 
@@ -204,7 +203,7 @@ def test_only_bad_responses_are_reported_as_invalid(monkeypatch, sleeps):
 def test_unusable_answer_fails_over(monkeypatch, sleeps):
     first = FakeCompletions(content="Sure! Here are your customers.")  # no tool call, not JSON
     second = FakeCompletions()
-    use_providers(monkeypatch, gemini=first, mistral=second)
+    use_providers(monkeypatch, gemini=first, groq=second)
 
     _ask()
 
@@ -222,16 +221,14 @@ def test_json_in_message_content_is_accepted(monkeypatch, sleeps):
 
 def test_each_provider_gets_its_model_and_tool_choice(monkeypatch, sleeps):
     gemini = FakeCompletions(errors=[server_error()])
-    mistral = FakeCompletions(errors=[server_error()])
     groq = FakeCompletions()
-    use_providers(monkeypatch, gemini=gemini, mistral=mistral, groq=groq)
+    use_providers(monkeypatch, gemini=gemini, groq=groq)
 
     _ask()
 
     assert (gemini.requests[0]["model"], gemini.requests[0]["tool_choice"]) == ("gemini-test-model", "auto")
-    assert (mistral.requests[0]["model"], mistral.requests[0]["tool_choice"]) == ("mistral-test-model", "any")
     assert (groq.requests[0]["model"], groq.requests[0]["tool_choice"]) == ("groq-test-model", "required")
-    for completions in (gemini, mistral, groq):
+    for completions in (gemini, groq):
         assert completions.requests[0]["max_tokens"] == 800
         assert "functions" not in completions.requests[0]
 
@@ -265,20 +262,35 @@ def test_groq_only_deployment_keeps_working(monkeypatch):
 
 
 def test_order_is_configurable_and_unknown_names_are_ignored(monkeypatch):
-    _set_keys(monkeypatch, "groq", "gemini", "mistral")
-    monkeypatch.setenv("LLM_PROVIDER_ORDER", " groq, nonsense ,MISTRAL,groq")
-    assert [p.name for p in client_module.configured_providers()] == ["groq", "mistral"]
+    _set_keys(monkeypatch, "groq", "gemini")
+    monkeypatch.setenv("LLM_PROVIDER_ORDER", " groq, nonsense ,GEMINI,groq")
+    assert [p.name for p in client_module.configured_providers()] == ["groq", "gemini"]
+
+
+@pytest.mark.parametrize("dropped", ["mistral", "cerebras", "openai"])
+def test_dropped_providers_are_not_supported(monkeypatch, dropped):
+    # Mistral and Cerebras need a payment method to activate; the chain is gemini,groq only.
+    _set_keys(monkeypatch, "groq")
+    monkeypatch.setenv(f"{dropped.upper()}_API_KEY", "k")
+    monkeypatch.setenv("LLM_PROVIDER_ORDER", f"{dropped},groq")
+    assert dropped not in client_module.PROVIDERS
+    assert [p.name for p in client_module.configured_providers()] == ["groq"]
+
+
+def test_default_order_is_gemini_then_groq():
+    assert client_module.DEFAULT_PROVIDER_ORDER == "gemini,groq"
+    assert set(client_module.PROVIDERS) == {"gemini", "groq"}
 
 
 def test_default_models_and_overrides(monkeypatch):
-    _set_keys(monkeypatch, "gemini", "mistral")
+    _set_keys(monkeypatch, "gemini", "groq")
     models = {p.name: p.model for p in client_module.configured_providers()}
-    assert models == {"gemini": "gemini-2.5-flash", "mistral": "mistral-small-latest"}
+    assert models == {"gemini": "gemini-2.5-flash", "groq": "qwen/qwen3.8-27b"}
 
     monkeypatch.setenv("GEMINI_MODEL", "gemini-x")
-    monkeypatch.setenv("MISTRAL_MODEL", "mistral-y")
+    monkeypatch.setenv("GROQ_MODEL", "groq-y")
     models = {p.name: p.model for p in client_module.configured_providers()}
-    assert models == {"gemini": "gemini-x", "mistral": "mistral-y"}
+    assert models == {"gemini": "gemini-x", "groq": "groq-y"}
 
 
 def test_placeholder_keys_count_as_missing(monkeypatch):
@@ -288,11 +300,10 @@ def test_placeholder_keys_count_as_missing(monkeypatch):
 
 
 def test_real_clients_use_provider_urls_and_no_sdk_retries(monkeypatch):
-    _set_keys(monkeypatch, "gemini", "mistral", "groq")
+    _set_keys(monkeypatch, "gemini", "groq")
     clients = {p.name: p.client for p in client_module.configured_providers()}
 
     assert str(clients["gemini"].base_url).startswith("https://generativelanguage.googleapis.com/v1beta/openai")
-    assert str(clients["mistral"].base_url).startswith("https://api.mistral.ai/v1")
     assert str(clients["groq"].base_url).startswith("https://api.groq.com/openai/v1")
     for client in clients.values():
         assert client.max_retries == 0  # the SDK must not retry underneath the failover policy
@@ -300,9 +311,9 @@ def test_real_clients_use_provider_urls_and_no_sdk_retries(monkeypatch):
 
 
 def test_get_openai_client_returns_first_available(monkeypatch):
-    _set_keys(monkeypatch, "groq", "mistral")
-    assert str(client_module.get_openai_client().base_url).startswith("https://api.mistral.ai")
-    client_module.mark_exhausted("mistral", 60)
+    _set_keys(monkeypatch, "groq", "gemini")
+    assert str(client_module.get_openai_client().base_url).startswith("https://generativelanguage.googleapis.com")
+    client_module.mark_exhausted("gemini", 60)
     assert str(client_module.get_openai_client().base_url).startswith("https://api.groq.com")
 
 

@@ -137,8 +137,7 @@ def _create_completion_with_retry(
     """
     if not configured_providers():
         raise OpenAIClientError(
-            "API key not found. Set at least one of GEMINI_API_KEY, MISTRAL_API_KEY, "
-            "GROQ_API_KEY or OPENAI_API_KEY in your .env file."
+            "API key not found. Set GEMINI_API_KEY and/or GROQ_API_KEY in your .env file."
         )
 
     providers = available_providers()

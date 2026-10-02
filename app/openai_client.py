@@ -7,9 +7,10 @@ them.
 
 Provider chain
 --------------
-``LLM_PROVIDER_ORDER`` (default ``gemini,mistral,groq,openai``) is the order in
-which providers are tried. Providers without an API key are skipped, so a
-deployment that only sets ``GROQ_API_KEY`` keeps working unchanged.
+``LLM_PROVIDER_ORDER`` (default ``gemini,groq``) is the order in which
+providers are tried. Providers without an API key are skipped, so a deployment
+that only sets ``GROQ_API_KEY`` keeps working unchanged. Only providers with a
+free tier that needs no payment method are supported.
 
 A provider that reports a *daily* quota exhaustion is parked for a cooldown
 (``mark_exhausted``) so later requests go straight to the next provider
@@ -22,9 +23,7 @@ Per-provider settings
 provider   API key             model override   default model
 =========  ==================  ===============  =======================================
 gemini     GEMINI_API_KEY      GEMINI_MODEL     gemini-2.5-flash
-mistral    MISTRAL_API_KEY     MISTRAL_MODEL    mistral-small-latest
 groq       GROQ_API_KEY        GROQ_MODEL       qwen/qwen3.8-27b
-openai     OPENAI_API_KEY      OPENAI_MODEL     gpt-4o-mini
 =========  ==================  ===============  =======================================
 """
 
@@ -54,11 +53,11 @@ class ProviderSpec:
     name: str
     key_env: str
     model_env: str
-    base_url: Optional[str]
+    base_url: str
     default_model: str
-    # How to force the single extraction tool. Mistral documents "any" (not
-    # "required"); Gemini's OpenAI-compatible layer only documents "auto", so
-    # the extractor also accepts a JSON reply in the message content.
+    # How to force the single extraction tool. Gemini's OpenAI-compatible
+    # layer only documents "auto", so the extractor also accepts a JSON reply
+    # in the message content; Groq supports "required".
     tool_choice: str
 
 
@@ -67,27 +66,16 @@ PROVIDERS: Dict[str, ProviderSpec] = {
         "gemini", "GEMINI_API_KEY", "GEMINI_MODEL",
         "https://generativelanguage.googleapis.com/v1beta/openai/", "gemini-2.5-flash", "auto",
     ),
-    "mistral": ProviderSpec(
-        "mistral", "MISTRAL_API_KEY", "MISTRAL_MODEL",
-        "https://api.mistral.ai/v1", "mistral-small-latest", "any",
-    ),
     "groq": ProviderSpec(
         "groq", "GROQ_API_KEY", "GROQ_MODEL",
         "https://api.groq.com/openai/v1", "qwen/qwen3.8-27b", "required",
     ),
-    "openai": ProviderSpec(
-        "openai", "OPENAI_API_KEY", "OPENAI_MODEL",
-        None, "gpt-4o-mini", "required",
-    ),
 }
 
-DEFAULT_PROVIDER_ORDER = "gemini,mistral,groq,openai"
+DEFAULT_PROVIDER_ORDER = "gemini,groq"
 LLM_REQUEST_TIMEOUT_SECONDS = 30.0
 
-_PLACEHOLDERS = {
-    "your_openai_api_key_here", "your_groq_api_key_here",
-    "your_gemini_api_key_here", "your_mistral_api_key_here",
-}
+_PLACEHOLDERS = {"your_groq_api_key_here", "your_gemini_api_key_here"}
 
 
 @dataclass
@@ -113,11 +101,13 @@ class Provider:
                 # max_retries=0: the SDK would otherwise retry 429/5xx on its own
                 # (2x, honoring Retry-After), hiding waits underneath the failover
                 # policy. A bounded timeout lets a hung provider fail over.
-                options = {"api_key": self.api_key, "max_retries": 0, "timeout": LLM_REQUEST_TIMEOUT_SECONDS}
-                if self.spec.base_url:
-                    options["base_url"] = self.spec.base_url
                 try:
-                    client = OpenAI(**options)
+                    client = OpenAI(
+                        api_key=self.api_key,
+                        base_url=self.spec.base_url,
+                        max_retries=0,
+                        timeout=LLM_REQUEST_TIMEOUT_SECONDS,
+                    )
                 except Exception as exc:
                     raise OpenAIClientError(f"Failed to initialize {self.name} client: {exc}")
                 _clients[self.name] = client
@@ -195,8 +185,7 @@ def get_openai_client() -> OpenAI:
     providers = available_providers() or configured_providers()
     if not providers:
         raise OpenAIClientError(
-            "API key not found. Set at least one of GEMINI_API_KEY, MISTRAL_API_KEY, "
-            "GROQ_API_KEY or OPENAI_API_KEY in your .env file."
+            "API key not found. Set GEMINI_API_KEY and/or GROQ_API_KEY in your .env file."
         )
     return providers[0].client
 

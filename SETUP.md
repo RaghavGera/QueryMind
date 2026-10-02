@@ -267,12 +267,10 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | Variable | Required | Notes |
 |---|---|---|
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | yes | Set **all five**. Setting only `DATABASE_URL` is ignored and silently falls back to `localhost:5432` (this caused an outage once). |
-| `GEMINI_API_KEY`, `MISTRAL_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY` | at least one | Every provider with a key joins the failover chain; providers without a key are skipped silently. |
-| `LLM_PROVIDER_ORDER` | no | Try order, default `gemini,mistral,groq,openai`. Unknown names are ignored. |
+| `GEMINI_API_KEY`, `GROQ_API_KEY` | at least one | Each provider with a key joins the failover chain; a provider without a key is skipped silently. |
+| `LLM_PROVIDER_ORDER` | no | Try order, default `gemini,groq`. Unknown names are ignored. |
 | `GEMINI_MODEL` | no | Default `gemini-2.5-flash`. |
-| `MISTRAL_MODEL` | no | Default `mistral-small-latest`. |
 | `GROQ_MODEL` | no | Default `qwen/qwen3.8-27b`. Older copies of `.env.example` suggested `llama-3.1-70b-versatile`; make sure a stale value is not set. |
-| `OPENAI_MODEL` | no | Default `gpt-4o-mini`. |
 | `BACKEND_CORS_ORIGINS` | no | Comma-separated; defaults include `http://localhost:5173` and the Vercel URL. |
 | `QUERYMIND_ENABLE_WRITES` | no | `true` allows confirmed natural-language INSERT/UPDATE. **Off by default** - leave it off on a public demo database. |
 | `QUERYMIND_CONFIRM_SECRET` | with writes | Long random string; keeps confirmation tokens valid across restarts/instances. |
@@ -283,10 +281,13 @@ The Vercel project's **Root Directory must be `frontend/`** so `frontend/vercel.
 
 ## LLM providers, failover and rate limits
 
-All LLM calls go through `app/openai_client.py`. Providers are tried in
-`LLM_PROVIDER_ORDER`; each request uses the standard `tools` API (`tool_choice`
-is `auto` for Gemini, `any` for Mistral, `required` for Groq/OpenAI, matching
-what each documents) and `max_tokens=800` for every provider.
+All LLM calls go through `app/openai_client.py`. The chain is Gemini (Google
+AI Studio, `https://generativelanguage.googleapis.com/v1beta/openai/`) then
+Groq; both have free tiers that need no payment method (Mistral and Cerebras
+were considered and dropped because they do). Each request uses the standard
+`tools` API (`tool_choice` is `auto` for Gemini, the only value its
+compatibility layer documents, and `required` for Groq) and `max_tokens=800`
+for both providers.
 
 Failover policy per request (`_create_completion_with_retry` in `app/intent_extractor.py`):
 
@@ -308,9 +309,8 @@ tokens/minute, 1,000 requests/day and 200,000 tokens/day; one extraction
 request ("What were our top 10 products?", schema trimmed to 2 tables) used 1,028 prompt + 139 completion
 tokens, so the daily token cap allows roughly 170 questions.
 
-**Render:** after deploying, set `GEMINI_API_KEY` and/or `MISTRAL_API_KEY` on the
-service. Providers without a key are skipped silently, so without them the
-chain is Groq only.
+**Render:** after deploying, set `GEMINI_API_KEY` on the service. A provider
+without a key is skipped silently, so without it the chain is Groq only.
 
 ### Prompt size
 
