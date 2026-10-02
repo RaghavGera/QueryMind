@@ -14,7 +14,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import httpx
 import openai
 import pytest
 from fastapi.responses import JSONResponse
@@ -25,45 +24,19 @@ from app.ambiguity_detector import AmbiguityDetector
 from app.intent_converter import convert_query_intent
 from app.intent_extractor import IntentExtractionError, QueryIntent
 from app.sql_generator import GenerationStatus, SQLGenerator
+from testing.llm_fakes import (
+    FakeCompletions,
+    connection_error,
+    http_response,
+    rate_limit_error,
+    use_providers,
+)
 from testing.test_phase4 import build_mock_schema
 
 
 # ---------------------------------------------------------------------- #
-# Fakes
+# Single-provider retry policy (multi-provider failover: test_llm_failover.py)
 # ---------------------------------------------------------------------- #
-
-def _http_response(status: int, headers: dict | None = None) -> httpx.Response:
-    return httpx.Response(
-        status, headers=headers or {}, request=httpx.Request("POST", "https://llm.test/v1/chat")
-    )
-
-
-def _rate_limit_error(retry_after: str | None = None) -> openai.RateLimitError:
-    headers = {"retry-after": retry_after} if retry_after else {}
-    return openai.RateLimitError("rate limited", response=_http_response(429, headers), body=None)
-
-
-class _FakeCompletions:
-    """Raises the queued errors in order, then returns a canned intent."""
-
-    def __init__(self, errors=(), arguments='{"query_type": "select", "tables": ["customers"]}'):
-        self.errors = list(errors)
-        self.calls = 0
-        self.arguments = arguments
-
-    def create(self, **kwargs):
-        self.calls += 1
-        if self.errors:
-            raise self.errors.pop(0)
-        call = type("TC", (), {"function": type("F", (), {"arguments": self.arguments})()})()
-        message = type("M", (), {"tool_calls": [call]})()
-        return type("R", (), {"choices": [type("C", (), {"message": message})()]})()
-
-
-class _FakeClient:
-    def __init__(self, completions):
-        self.chat = type("Chat", (), {"completions": completions})()
-
 
 @pytest.fixture
 def sleeps(monkeypatch):
@@ -74,31 +47,26 @@ def sleeps(monkeypatch):
 
 
 def _use_client(monkeypatch, completions):
-    monkeypatch.setattr(extractor, "get_openai_client", lambda: _FakeClient(completions))
-    monkeypatch.setattr(extractor, "get_model", lambda: "test-model")
+    """Only Groq configured, backed by a fake client."""
+    use_providers(monkeypatch, groq=completions)
 
 
 SCHEMA_CONTEXT = {"tables": ["customers"], "columns": {"customers": ["customer_id"]}}
 
 
-# ---------------------------------------------------------------------- #
-# Retry / backoff
-# ---------------------------------------------------------------------- #
-
-def test_retries_rate_limit_then_succeeds(monkeypatch, sleeps):
-    completions = _FakeCompletions(errors=[_rate_limit_error(), _rate_limit_error()])
+def test_one_retry_on_a_per_minute_rate_limit(monkeypatch, sleeps):
+    completions = FakeCompletions(errors=[rate_limit_error()])
     _use_client(monkeypatch, completions)
 
     intent = extractor.extract_intent("show customers", SCHEMA_CONTEXT)
 
     assert intent.tables == ["customers"]
-    assert completions.calls == 3
-    assert len(sleeps) == 2
-    assert sleeps[1] > sleeps[0] * 0.9  # backoff grows
+    assert completions.calls == 2
+    assert len(sleeps) == 1
 
 
 def test_retry_after_header_is_honored(monkeypatch, sleeps):
-    completions = _FakeCompletions(errors=[_rate_limit_error(retry_after="3")])
+    completions = FakeCompletions(errors=[rate_limit_error(retry_after="3")])
     _use_client(monkeypatch, completions)
 
     extractor.extract_intent("show customers", SCHEMA_CONTEXT)
@@ -106,18 +74,21 @@ def test_retry_after_header_is_honored(monkeypatch, sleeps):
     assert sleeps == [3.0]
 
 
-def test_retry_after_is_capped(monkeypatch, sleeps):
-    completions = _FakeCompletions(errors=[_rate_limit_error(retry_after="600")])
+def test_long_retry_after_is_not_waited_for(monkeypatch, sleeps):
+    # Waiting 10 minutes inside a request is worse than failing fast.
+    completions = FakeCompletions(errors=[rate_limit_error(retry_after="600")])
     _use_client(monkeypatch, completions)
 
-    extractor.extract_intent("show customers", SCHEMA_CONTEXT)
+    with pytest.raises(IntentExtractionError) as excinfo:
+        extractor.extract_intent("show customers", SCHEMA_CONTEXT)
 
-    assert sleeps == [extractor.LLM_BACKOFF_CAP_SECONDS]
+    assert excinfo.value.kind == "rate_limited"
+    assert sleeps == []
+    assert completions.calls == 1
 
 
-def test_exhausted_rate_limit_raises_typed_error(monkeypatch, sleeps):
-    errors = [_rate_limit_error() for _ in range(extractor.LLM_MAX_RETRIES + 1)]
-    completions = _FakeCompletions(errors=errors)
+def test_retries_are_not_stacked(monkeypatch, sleeps):
+    completions = FakeCompletions(errors=[rate_limit_error() for _ in range(5)])
     _use_client(monkeypatch, completions)
 
     with pytest.raises(IntentExtractionError) as excinfo:
@@ -125,13 +96,12 @@ def test_exhausted_rate_limit_raises_typed_error(monkeypatch, sleeps):
 
     assert excinfo.value.kind == "rate_limited"
     assert excinfo.value.retry_after
-    assert completions.calls == extractor.LLM_MAX_RETRIES + 1
+    assert completions.calls == 2  # the call plus exactly one retry
+    assert len(sleeps) == 1
 
 
-def test_connection_errors_are_retried_and_reported_unavailable(monkeypatch, sleeps):
-    request = httpx.Request("POST", "https://llm.test/v1/chat")
-    errors = [openai.APIConnectionError(request=request) for _ in range(extractor.LLM_MAX_RETRIES + 1)]
-    _use_client(monkeypatch, _FakeCompletions(errors=errors))
+def test_connection_errors_are_reported_unavailable(monkeypatch, sleeps):
+    _use_client(monkeypatch, FakeCompletions(errors=[connection_error()]))
 
     with pytest.raises(IntentExtractionError) as excinfo:
         extractor.extract_intent("show customers", SCHEMA_CONTEXT)
@@ -140,8 +110,8 @@ def test_connection_errors_are_retried_and_reported_unavailable(monkeypatch, sle
 
 
 def test_non_transient_errors_are_not_retried(monkeypatch, sleeps):
-    bad_request = openai.BadRequestError("bad", response=_http_response(400), body=None)
-    completions = _FakeCompletions(errors=[bad_request])
+    bad_request = openai.BadRequestError("bad", response=http_response(400), body=None)
+    completions = FakeCompletions(errors=[bad_request])
     _use_client(monkeypatch, completions)
 
     with pytest.raises(IntentExtractionError) as excinfo:
@@ -153,7 +123,7 @@ def test_non_transient_errors_are_not_retried(monkeypatch, sleeps):
 
 
 def test_unparseable_arguments_are_invalid_response(monkeypatch, sleeps):
-    _use_client(monkeypatch, _FakeCompletions(arguments="{not json"))
+    _use_client(monkeypatch, FakeCompletions(arguments="{not json"))
 
     with pytest.raises(IntentExtractionError) as excinfo:
         extractor.extract_intent("show customers", SCHEMA_CONTEXT)
@@ -438,18 +408,13 @@ def test_schema_listing_is_compact():
 
 
 def test_request_uses_the_portable_tools_api(monkeypatch, sleeps):
-    seen = {}
-
-    class Recording(_FakeCompletions):
-        def create(self, **kwargs):
-            seen.update(kwargs)
-            return super().create(**kwargs)
-
-    _use_client(monkeypatch, Recording())
+    completions = FakeCompletions()
+    _use_client(monkeypatch, completions)
     extractor.extract_intent("show customers", SCHEMA_CONTEXT)
+    seen = completions.requests[0]
 
     assert seen["tool_choice"] == "required"
     assert seen["tools"][0]["type"] == "function"
     assert seen["tools"][0]["function"]["name"] == "extract_query_intent"
     assert "functions" not in seen and "function_call" not in seen  # legacy API unsupported by some providers
-    assert seen["model"] == "test-model" and seen["max_tokens"] == 800
+    assert seen["model"] == "groq-test-model" and seen["max_tokens"] == 800

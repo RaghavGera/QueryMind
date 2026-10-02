@@ -6,32 +6,48 @@ It parses user questions and identifies query components like tables, columns, c
 aggregations, and other SQL-related operations.
 """
 
-from typing import List, Optional, Dict, Any
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from pydantic import BaseModel, Field
 import json
 import logging
-import os
 import re
 import random
 import time
-from app.openai_client import get_model, get_openai_client
+from app.entity_recognizer import EntityRecognizer
+from app.openai_client import (
+    OpenAIClientError,
+    Provider,
+    available_providers,
+    configured_providers,
+    mark_exhausted,
+    seconds_until_available,
+)
 from datetime import date
 
 import openai
 
 logger = logging.getLogger(__name__)
 
-# Groq's free tier throttles aggressively (429) and occasionally 5xx's. Retry
-# transient failures a few times with exponential backoff before giving up.
-LLM_MAX_TOKENS = 800  # Do not raise without re-verifying against Groq limits (429/502).
-LLM_MAX_RETRIES = 3
+# Free tiers throttle per minute and cap per day. Policy (per request):
+#   * daily-quota 429  -> park that provider, fail over immediately (no retry)
+#   * per-minute 429   -> at most ONE short retry honoring Retry-After, then fail over
+#   * 5xx / connection -> fail over
+#   * other 4xx (bad key, unknown model, rejected request) -> fail over, so one
+#     misconfigured provider cannot take /query down while others work
+# IntentExtractionError(kind="rate_limited") is raised only when every
+# configured provider is rate limited or parked.
+LLM_MAX_TOKENS = 800  # Same for every provider. Do not raise without re-verifying free-tier limits.
 LLM_BACKOFF_BASE_SECONDS = 1.0
-LLM_BACKOFF_CAP_SECONDS = 8.0
+LLM_BACKOFF_CAP_SECONDS = 8.0  # a longer Retry-After means "fail over now", not "wait"
+DAILY_QUOTA_DEFAULT_COOLDOWN_SECONDS = 15 * 60
 
-_TRANSIENT_ERRORS = (
-    openai.RateLimitError,
-    openai.APIConnectionError,  # also covers APITimeoutError
-    openai.InternalServerError,
+_DAILY_QUOTA = re.compile(
+    r"tokens?\s+per\s+day|requests?\s+per\s+day|\bTPD\b|\bRPD\b|per[\s_-]?day|daily",
+    re.IGNORECASE,
+)
+_TRY_AGAIN_IN = re.compile(
+    r"try again in\s+(?:(\d+(?:\.\d+)?)h)?\s*(?:(\d+(?:\.\d+)?)m(?!s))?\s*(?:(\d+(?:\.\d+)?)s)?",
+    re.IGNORECASE,
 )
 
 
@@ -50,37 +66,146 @@ class IntentExtractionError(Exception):
         self.retry_after = retry_after
 
 
-def _retry_delay(attempt: int, exc: Exception) -> float:
-    """Backoff for retry ``attempt`` (0-based), honoring a Retry-After header."""
-    response = getattr(exc, "response", None)
-    header = getattr(response, "headers", None)
+class _UnusableResponse(Exception):
+    """The provider answered, but not with a usable intent."""
+
+
+def _error_text(exc: Exception) -> str:
+    body = getattr(exc, "body", None)
+    return f"{exc} {json.dumps(body) if isinstance(body, (dict, list)) else body or ''}"
+
+
+def _is_daily_quota(exc: Exception) -> bool:
+    """A 429 caused by a per-day (or per-month) cap rather than a per-minute one."""
+    return bool(_DAILY_QUOTA.search(_error_text(exc)))
+
+
+def _retry_after_header(exc: Exception) -> Optional[float]:
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    if headers is None:
+        return None
+    try:
+        return float(headers.get("retry-after"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _daily_cooldown(exc: Exception) -> float:
+    """How long to park a provider: the provider's hint, else a default."""
+    match = _TRY_AGAIN_IN.search(_error_text(exc))
+    if match and any(match.groups()):
+        hours, minutes, seconds = (float(g) if g else 0.0 for g in match.groups())
+        return hours * 3600 + minutes * 60 + seconds
+    header = _retry_after_header(exc)
+    if header and header > LLM_BACKOFF_CAP_SECONDS:
+        return header
+    return DAILY_QUOTA_DEFAULT_COOLDOWN_SECONDS
+
+
+def _transient_retry_delay(exc: Exception) -> Optional[float]:
+    """Delay for the single per-minute retry, or None to fail over right away."""
+    header = _retry_after_header(exc)
     if header is not None:
-        try:
-            return min(float(header.get("retry-after")), LLM_BACKOFF_CAP_SECONDS)
-        except (TypeError, ValueError):
-            pass
-    delay = min(LLM_BACKOFF_BASE_SECONDS * (2 ** attempt), LLM_BACKOFF_CAP_SECONDS)
-    return delay + random.uniform(0, delay / 4)
+        return header if header <= LLM_BACKOFF_CAP_SECONDS else None
+    return LLM_BACKOFF_BASE_SECONDS + random.uniform(0, LLM_BACKOFF_BASE_SECONDS / 4)
 
 
-def _create_completion_with_retry(client, **kwargs):
-    """Call the chat completion API, retrying transient failures with backoff."""
-    for attempt in range(LLM_MAX_RETRIES + 1):
-        try:
-            return client.chat.completions.create(**kwargs)
-        except _TRANSIENT_ERRORS as exc:
-            if attempt >= LLM_MAX_RETRIES:
-                kind = "rate_limited" if isinstance(exc, openai.RateLimitError) else "unavailable"
-                raise IntentExtractionError(
-                    f"LLM provider is {'rate limiting requests' if kind == 'rate_limited' else 'unavailable'} "
-                    f"after {LLM_MAX_RETRIES + 1} attempts: {exc}",
-                    kind=kind,
-                    retry_after=LLM_BACKOFF_CAP_SECONDS,
-                ) from exc
-            delay = _retry_delay(attempt, exc)
-            logger.warning("LLM call failed (%s); retry %d/%d in %.1fs",
-                           type(exc).__name__, attempt + 1, LLM_MAX_RETRIES, delay)
-            time.sleep(delay)
+def _log_usage(provider: Provider, response: Any) -> None:
+    usage = getattr(response, "usage", None)
+    logger.info(
+        "LLM request served provider=%s model=%s prompt_tokens=%s completion_tokens=%s",
+        provider.name,
+        provider.model,
+        getattr(usage, "prompt_tokens", None),
+        getattr(usage, "completion_tokens", None),
+    )
+
+
+def _create_completion_with_retry(
+    request: Dict[str, Any],
+    parse: Callable[[Any], Any],
+) -> Tuple[Any, Provider, Any]:
+    """
+    Send ``request`` through the provider chain until one returns something
+    ``parse`` accepts.
+
+    Returns:
+        (parsed result, provider that served it, raw response)
+
+    Raises:
+        IntentExtractionError: when every configured provider failed.
+    """
+    if not configured_providers():
+        raise OpenAIClientError(
+            "API key not found. Set at least one of GEMINI_API_KEY, MISTRAL_API_KEY, "
+            "GROQ_API_KEY or OPENAI_API_KEY in your .env file."
+        )
+
+    providers = available_providers()
+    if not providers:
+        wait = seconds_until_available()
+        raise IntentExtractionError(
+            "Every configured LLM provider has used up its daily quota.",
+            kind="rate_limited",
+            retry_after=round(wait) if wait else LLM_BACKOFF_CAP_SECONDS,
+        )
+
+    failures: List[Tuple[str, str]] = []  # (provider, kind)
+    retry_hints: List[float] = []
+    for provider in providers:
+        retried = False
+        while True:
+            try:
+                response = provider.client.chat.completions.create(
+                    model=provider.model,
+                    tool_choice=provider.tool_choice,
+                    **request,
+                )
+                _log_usage(provider, response)
+                return parse(response), provider, response
+            except openai.RateLimitError as exc:
+                if _is_daily_quota(exc):
+                    cooldown = _daily_cooldown(exc)
+                    mark_exhausted(provider.name, cooldown)
+                    retry_hints.append(cooldown)
+                    failures.append((provider.name, "rate_limited"))
+                    break
+                delay = _transient_retry_delay(exc)
+                if not retried and delay is not None:
+                    logger.warning("LLM provider %s rate limited; one retry in %.1fs", provider.name, delay)
+                    retried = True
+                    time.sleep(delay)
+                    continue
+                retry_hints.append(delay if delay is not None else LLM_BACKOFF_CAP_SECONDS)
+                failures.append((provider.name, "rate_limited"))
+                logger.warning("LLM provider %s still rate limited; failing over", provider.name)
+                break
+            except (openai.APIConnectionError, openai.InternalServerError) as exc:
+                failures.append((provider.name, "unavailable"))
+                logger.warning("LLM provider %s unavailable (%s); failing over", provider.name, type(exc).__name__)
+                break
+            except (openai.APIStatusError, _UnusableResponse) as exc:
+                failures.append((provider.name, "invalid_response"))
+                logger.warning("LLM provider %s failed (%s: %s); failing over",
+                               provider.name, type(exc).__name__, str(exc)[:200])
+                break
+
+    kinds = {kind for _, kind in failures}
+    tried = ", ".join(f"{name} ({kind})" for name, kind in failures)
+    if kinds == {"rate_limited"}:
+        raise IntentExtractionError(
+            f"All LLM providers are rate limited: {tried}",
+            kind="rate_limited",
+            retry_after=round(min(retry_hints)) if retry_hints else LLM_BACKOFF_CAP_SECONDS,
+        )
+    if kinds & {"rate_limited", "unavailable"}:
+        raise IntentExtractionError(
+            f"No LLM provider could answer: {tried}",
+            kind="unavailable",
+            retry_after=LLM_BACKOFF_CAP_SECONDS,
+        )
+    raise IntentExtractionError(f"Error extracting intent: no provider returned a usable intent: {tried}")
+
 
 class QueryIntent(BaseModel):
     """
@@ -280,11 +405,11 @@ def extract_intent(question: str, schema_context: dict) -> QueryIntent:
     """
     Extract structured query intent from a natural language question.
 
-    Uses function calling so the model returns arguments matching
-    ``build_function_schema``. Transient provider failures (429/5xx/connection)
-    are retried with backoff; anything unrecoverable raises
-    ``IntentExtractionError`` carrying a ``kind`` the API layer maps to an
-    HTTP status.
+    Uses the standard ``tools`` API so the model returns arguments matching
+    ``build_function_schema``; providers are tried in ``LLM_PROVIDER_ORDER``
+    with the failover policy above. Only the tables relevant to the question
+    are sent (see ``trim_schema_context``); validation elsewhere still uses
+    the full schema.
 
     Args:
         question: The natural language question from the user
@@ -294,44 +419,146 @@ def extract_intent(question: str, schema_context: dict) -> QueryIntent:
         QueryIntent: A structured representation of the query intent
 
     Raises:
-        IntentExtractionError: If the LLM call fails or returns unusable data
+        IntentExtractionError: If no provider returned a usable intent
     """
-    client = get_openai_client()
-
-    user_prompt = f"""Database Schema:
-{_format_schema_context(schema_context)}
-Current date: {date.today().isoformat()}
-User Question: {question}"""
-
+    request = build_extraction_request(question, schema_context)
     try:
-        # Call API with function calling (supports both Groq and OpenAI)
-        response = _create_completion_with_retry(
-            client,
-            model=get_model(),
-            messages=[
-                {"role": "system", "content": build_system_prompt(question)},
-                {"role": "user", "content": user_prompt},
-            ],
-            tools=[{"type": "function", "function": build_function_schema(question)}],
-            tool_choice="required",  # one tool, so "required" forces it; portable across providers
-            temperature=0.1,  # Low temperature for more deterministic outputs
-            max_tokens=LLM_MAX_TOKENS,
-        )
-
-        message = response.choices[0].message
-
-        if not getattr(message, "tool_calls", None):
-            raise IntentExtractionError("Error extracting intent: No tool call in response")
-
-        intent_data = json.loads(message.tool_calls[0].function.arguments)
-        return QueryIntent(**intent_data)
-
+        intent, _, _ = _create_completion_with_retry(request, parse=_parse_intent)
+        return intent
     except IntentExtractionError:
         raise
-    except json.JSONDecodeError as e:
-        raise IntentExtractionError(f"Failed to parse intent data: {str(e)}") from e
     except Exception as e:
         raise IntentExtractionError(f"Error extracting intent: {str(e)}") from e
+
+
+def build_extraction_request(question: str, schema_context: dict, trim: bool = True) -> Dict[str, Any]:
+    """
+    Provider-independent request body (model and tool_choice are per provider).
+    ``trim=False`` sends the full schema (used to measure the trimming saving).
+    """
+    prompt_schema = trim_schema_context(question, schema_context) if trim else schema_context
+    user_prompt = f"""Database Schema:
+{_format_schema_context(prompt_schema)}
+Current date: {date.today().isoformat()}
+User Question: {question}"""
+    return {
+        "messages": [
+            {"role": "system", "content": build_system_prompt(question)},
+            {"role": "user", "content": user_prompt},
+        ],
+        "tools": [{"type": "function", "function": build_function_schema(question)}],
+        "temperature": 0.1,  # Low temperature for more deterministic outputs
+        "max_tokens": LLM_MAX_TOKENS,
+    }
+
+
+_JSON_FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
+
+
+def _parse_intent(response: Any) -> QueryIntent:
+    """
+    Read the intent from the tool call. With ``tool_choice="auto"`` (Gemini)
+    a model may answer with the JSON in the message body instead; accept that
+    too. Anything else is unusable and the next provider is tried.
+    """
+    try:
+        message = response.choices[0].message
+    except (AttributeError, IndexError, TypeError) as exc:
+        raise _UnusableResponse("response has no message") from exc
+
+    tool_calls = getattr(message, "tool_calls", None)
+    if tool_calls:
+        raw = tool_calls[0].function.arguments
+    else:
+        content = (getattr(message, "content", None) or "").strip()
+        raw = _JSON_FENCE.sub("", content)
+        if not raw.startswith("{"):
+            raise _UnusableResponse("No tool call in response")
+
+    try:
+        return QueryIntent(**json.loads(raw))
+    except (ValueError, TypeError) as exc:  # JSONDecodeError and pydantic errors are ValueErrors
+        raise _UnusableResponse(f"Failed to parse intent data: {exc}") from exc
+
+
+# ---------------------------------------------------------------- schema trimming
+
+# Metric words whose columns live in fact tables the question rarely names
+# ("revenue per customer" needs order_items even though only "customer" is
+# mentioned). When one appears, tables holding such columns are kept too.
+_METRIC_WORDS = re.compile(
+    r"\b(revenue|sales|spen[dt]\w*|sold|sell\w*|bought|purchas\w*|quantity|units?|"
+    r"money|income|earn\w*|value|amount|totals?)\b",
+    re.IGNORECASE,
+)
+_METRIC_COLUMNS = {"quantity", "unit_price", "price", "amount", "total"}
+
+
+def _parse_relationship(relationship: str) -> Optional[Tuple[str, str]]:
+    """'orders.customer_id -> customers.customer_id' -> ('orders', 'customers')"""
+    try:
+        left, right = (side.strip() for side in relationship.split("->", 1))
+        return left.split(".", 1)[0], right.split(".", 1)[0]
+    except ValueError:
+        return None
+
+
+def relevant_tables(question: str, schema_context: dict) -> List[str]:
+    """
+    Tables the question needs: those EntityRecognizer finds (directly or via a
+    column), plus metric tables for metric words, plus every table one
+    foreign key away. Empty list means "could not tell" -> use the full schema.
+    """
+    columns = schema_context.get("columns") or {}
+    if not columns:
+        return []
+
+    entities = EntityRecognizer(columns).recognize_entities(question)
+    found = {e.entity_name for e in entities if e.entity_type == "table"}
+    found |= {e.table_name for e in entities if e.entity_type == "column" and e.table_name}
+    found &= set(columns)
+    if not found:
+        return []
+
+    if _METRIC_WORDS.search(question):
+        found |= {
+            table for table, table_columns in columns.items()
+            if _METRIC_COLUMNS & {c.lower() for c in table_columns}
+        }
+
+    keep = set(found)
+    for relationship in schema_context.get("relationships") or []:
+        edge = _parse_relationship(relationship)
+        if not edge:
+            continue
+        left, right = edge
+        if left in found:
+            keep.add(right)
+        if right in found:
+            keep.add(left)
+
+    return [table for table in columns if table in keep]
+
+
+def trim_schema_context(question: str, schema_context: dict) -> dict:
+    """
+    The schema context restricted to ``relevant_tables``. Falls back to the
+    full context when nothing is recognised -- never fails closed.
+    """
+    keep = relevant_tables(question, schema_context)
+    if not keep or len(keep) == len(schema_context.get("columns") or {}):
+        return schema_context  # nothing recognised, or every table is relevant anyway
+    kept = set(keep)
+    relationships = []
+    for relationship in schema_context.get("relationships") or []:
+        edge = _parse_relationship(relationship)
+        if edge and edge[0] in kept and edge[1] in kept:
+            relationships.append(relationship)
+    return {
+        "tables": [t for t in schema_context.get("tables", keep) if t in kept],
+        "columns": {t: c for t, c in schema_context["columns"].items() if t in kept},
+        "relationships": relationships,
+    }
 
 
 def _format_schema_context(schema_context: dict) -> str:
