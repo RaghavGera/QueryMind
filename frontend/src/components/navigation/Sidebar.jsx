@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { Link, NavLink } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   MessageSquare,
@@ -66,7 +66,11 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onClo
         )}
       >
         <div className={cn("flex h-16 items-center px-4", collapsed ? "justify-center" : "justify-between")}>
-          {!collapsed && <span className="font-display text-sm font-semibold text-ink">QueryMind</span>}
+          {!collapsed && (
+            <Link to="/" className="font-display text-sm font-semibold text-ink">
+              QueryMind
+            </Link>
+          )}
           <button onClick={onToggleCollapse} className="btn-ghost !px-1.5">
             {collapsed ? <ChevronsRight size={16} /> : <ChevronsLeft size={16} />}
           </button>
@@ -96,7 +100,9 @@ export default function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onClo
               transition={{ type: "spring", stiffness: 300, damping: 32 }}
             >
               <div className="flex h-16 items-center justify-between px-4">
-                <span className="font-display text-sm font-semibold text-ink">QueryMind</span>
+                <Link to="/" onClick={onCloseMobile} className="font-display text-sm font-semibold text-ink">
+                  QueryMind
+                </Link>
                 <button onClick={onCloseMobile} className="btn-ghost !px-1.5">
                   <X size={16} />
                 </button>
