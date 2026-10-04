@@ -93,7 +93,7 @@ class FakeClient:
 
 
 def clear_provider_env(monkeypatch) -> None:
-    for name in ALL_KEY_ENVS + ALL_MODEL_ENVS + ["LLM_PROVIDER_ORDER"]:
+    for name in ALL_KEY_ENVS + ALL_MODEL_ENVS + ["LLM_PROVIDER_ORDER", "LLM_TIMEOUT_SECONDS"]:
         monkeypatch.delenv(name, raising=False)
     client_module.reset_client()
 

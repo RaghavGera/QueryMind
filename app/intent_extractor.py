@@ -111,14 +111,15 @@ def _transient_retry_delay(exc: Exception) -> Optional[float]:
     return LLM_BACKOFF_BASE_SECONDS + random.uniform(0, LLM_BACKOFF_BASE_SECONDS / 4)
 
 
-def _log_usage(provider: Provider, response: Any) -> None:
+def _log_usage(provider: Provider, response: Any, seconds: float) -> None:
     usage = getattr(response, "usage", None)
     logger.info(
-        "LLM request served provider=%s model=%s prompt_tokens=%s completion_tokens=%s",
+        "LLM request served provider=%s model=%s prompt_tokens=%s completion_tokens=%s seconds=%.2f",
         provider.name,
         provider.model,
         getattr(usage, "prompt_tokens", None),
         getattr(usage, "completion_tokens", None),
+        seconds,
     )
 
 
@@ -155,13 +156,14 @@ def _create_completion_with_retry(
     for provider in providers:
         retried = False
         while True:
+            started = time.monotonic()
             try:
                 response = provider.client.chat.completions.create(
                     model=provider.model,
                     tool_choice=provider.tool_choice,
                     **request,
                 )
-                _log_usage(provider, response)
+                _log_usage(provider, response, time.monotonic() - started)
                 return parse(response), provider, response
             except openai.RateLimitError as exc:
                 if _is_daily_quota(exc):
@@ -182,7 +184,8 @@ def _create_completion_with_retry(
                 break
             except (openai.APIConnectionError, openai.InternalServerError) as exc:
                 failures.append((provider.name, "unavailable"))
-                logger.warning("LLM provider %s unavailable (%s); failing over", provider.name, type(exc).__name__)
+                logger.warning("LLM provider %s unavailable (%s after %.1fs); failing over",
+                               provider.name, type(exc).__name__, time.monotonic() - started)
                 break
             except (openai.APIStatusError, _UnusableResponse) as exc:
                 failures.append((provider.name, "invalid_response"))

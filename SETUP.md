@@ -272,6 +272,8 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | `GEMINI_LITE_MODEL` | no | Default `gemini-3.1-flash-lite` (free tier: 500 requests/day). |
 | `GEMINI_FLASH_MODEL` | no | Default `gemini-3.8-flash` (free tier: 20 requests/day). |
 | `GROQ_MODEL` | no | Default `qwen/qwen3.8-27b`. Older copies of `.env.example` suggested `llama-3.1-70b-versatile`; make sure a stale value is not set. |
+| `LLM_TIMEOUT_SECONDS` | no | Per-request LLM timeout before failing over to the next entry. Default `12`. |
+| `LOG_LEVEL` | no | Python log level for the app (default `INFO`). At `INFO` every request logs `LLM request served provider=... seconds=...`. |
 | `BACKEND_CORS_ORIGINS` | no | Comma-separated; defaults include `http://localhost:5173` and the Vercel URL. |
 | `QUERYMIND_ENABLE_WRITES` | no | `true` allows confirmed natural-language INSERT/UPDATE. **Off by default** - leave it off on a public demo database. |
 | `QUERYMIND_CONFIRM_SECRET` | with writes | Long random string; keeps confirmation tokens valid across restarts/instances. |
@@ -301,7 +303,7 @@ Failover policy per request (`_create_completion_with_retry` in `app/intent_extr
 |---|---|
 | 429 mentioning a daily quota (tokens/requests per day, TPD/RPD, `...PerDay...` quota IDs, "daily") | That entry is parked for the time it reports (Groq: "try again in 3m53s", Gemini: "retry in 10h5m39s"; default 15 min) and the next entry is tried immediately. No retry. Gemini's per-model quotas mean Flash-Lite running out does not park Flash. |
 | 429 per-minute | One retry after `Retry-After` (or ~1 s); if `Retry-After` is over 8 s, no wait. Then the next provider. |
-| 5xx, timeout (30 s), connection error | Next provider. |
+| 5xx, timeout (`LLM_TIMEOUT_SECONDS`, default 12 s), connection error | Next provider. |
 | Other 4xx (bad key, unknown model, rejected request) or an unusable answer | Next provider, so one misconfigured provider cannot take `/query` down. |
 
 `/query` returns 429 only when every configured provider is rate limited or

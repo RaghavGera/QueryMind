@@ -70,6 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- Slow requests (35-40 s) when gemini-lite hung: the LLM timeout was 30 s before failing over.
+  It is now 12 s by default and configurable with `LLM_TIMEOUT_SECONDS`; the usage log line
+  and the failover warning now include how long the call took (`seconds=`).
 - App logs were silently dropped in production: nothing configured logging, so under uvicorn
   only WARNING+ lines from `app.*` were printed and the per-request
   `LLM request served provider=... prompt_tokens=...` line never reached the Render logs.

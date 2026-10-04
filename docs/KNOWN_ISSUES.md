@@ -34,7 +34,7 @@ previews (all previously listed here as open).
 
 | Issue | Notes |
 |---|---|
-| Latency outliers | Same run: median 3.8 s, p90 9.7 s, but 5/41 requests took 35–40 s. Likely an LLM call hitting the 30 s timeout before failing over; confirm in the Render logs (`LLM request served provider=…`) |
+| Latency outliers | Same run: median 3.8 s, p90 9.7 s, but 5/41 requests took 35–40 s. **Cause confirmed** in the Render logs (2026-10-04): `LLM provider gemini-lite unavailable (APITimeoutError); failing over` — gemini-lite hung until the 30 s timeout. Fixed in code: timeout now 12 s (`LLM_TIMEOUT_SECONDS`), log lines include `seconds=`; **needs a live re-check after deploy** |
 | No auth / rate limiting | Anyone can call `/query` and spend the LLM quota (Phase 3) |
 | History and saved queries are browser-only | Stored in `localStorage`, not per user (Phase 3) |
 | No usage analytics | Clarification rate, latency, success rate are not recorded server-side (Phase 3) |
@@ -73,3 +73,7 @@ backend without a manual deploy — the period-comparison fix went live after th
 push). Item 3 confirmed in effect: `/`, `/app`, `/app/settings`,
 `/architecture`, `/developers` on `https://query-mind-tawny.vercel.app` all
 return 200 with the app shell. Items 1, 4, 5, 6 still open.
+
+Update 2026-10-04 (owner): item 5 confirmed — Render logs show `LLM request served provider=gemini-lite`. Item 6: `GROQ_MODEL` is not set on Render (default used). `DATABASE_URL` is set on Render but unused by the code; delete it after the password rotation.
+
+7. **The Render PostgreSQL database expires on 2026-10-23** (free plan). Before then: upgrade the plan, or migrate (`pg_dump` → restore on the new host → update the five `DB_*` vars → `/health`). A migration also replaces the leaked credentials from item 1.

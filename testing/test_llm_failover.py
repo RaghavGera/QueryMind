@@ -11,6 +11,7 @@ GEMINI_API_KEY). All providers are fakes; no network. Policy under test:
 
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -85,9 +86,12 @@ def test_provider_1_rate_limited_succeeds_on_provider_2(monkeypatch, sleeps, cap
     assert second.calls == 1
     assert len(sleeps) == 1
     served = [r.getMessage() for r in caplog.records if "LLM request served" in r.getMessage()]
-    assert served == [
-        "LLM request served provider=groq model=groq-test-model prompt_tokens=321 completion_tokens=54"
-    ]
+    assert len(served) == 1
+    assert re.fullmatch(
+        r"LLM request served provider=groq model=groq-test-model prompt_tokens=321 completion_tokens=54 "
+        r"seconds=\d+\.\d\d",
+        served[0],
+    )
 
 
 def test_daily_quota_fails_over_immediately_without_retry(monkeypatch, sleeps):
@@ -383,7 +387,18 @@ def test_real_clients_use_provider_urls_and_no_sdk_retries(monkeypatch):
     assert str(clients["groq"].base_url).startswith("https://api.groq.com/openai/v1")
     for client in clients.values():
         assert client.max_retries == 0  # the SDK must not retry underneath the failover policy
-        assert client.timeout == client_module.LLM_REQUEST_TIMEOUT_SECONDS
+        assert client.timeout == client_module.DEFAULT_LLM_TIMEOUT_SECONDS
+
+
+@pytest.mark.parametrize("raw, expected", [
+    (None, 12.0), ("20", 20.0), ("7.5", 7.5), ("0", 12.0), ("-3", 12.0), ("soon", 12.0),
+])
+def test_llm_timeout_is_configurable(monkeypatch, raw, expected):
+    if raw is None:
+        monkeypatch.delenv("LLM_TIMEOUT_SECONDS", raising=False)
+    else:
+        monkeypatch.setenv("LLM_TIMEOUT_SECONDS", raw)
+    assert client_module.llm_timeout_seconds() == expected
 
 
 def test_get_openai_client_returns_first_available(monkeypatch):

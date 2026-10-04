@@ -90,7 +90,18 @@ PROVIDERS: Dict[str, ProviderSpec] = {
 DEFAULT_PROVIDER_ORDER = "gemini-lite,gemini-flash,groq"
 # Shorthands accepted in LLM_PROVIDER_ORDER.
 _ALIASES = {"gemini": ["gemini-lite", "gemini-flash"]}
-LLM_REQUEST_TIMEOUT_SECONDS = 30.0
+# A healthy extraction call takes a few seconds; gemini-lite occasionally hangs
+# and, at 30 s, those requests took 35-40 s end to end (live, 2026-10-04).
+DEFAULT_LLM_TIMEOUT_SECONDS = 12.0
+
+
+def llm_timeout_seconds() -> float:
+    """Per-request timeout (LLM_TIMEOUT_SECONDS); a hung provider fails over after this."""
+    try:
+        value = float(os.getenv("LLM_TIMEOUT_SECONDS", DEFAULT_LLM_TIMEOUT_SECONDS))
+    except ValueError:
+        return DEFAULT_LLM_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_LLM_TIMEOUT_SECONDS
 
 _PLACEHOLDERS = {"your_groq_api_key_here", "your_gemini_api_key_here"}
 
@@ -123,7 +134,7 @@ class Provider:
                         api_key=self.api_key,
                         base_url=self.spec.base_url,
                         max_retries=0,
-                        timeout=LLM_REQUEST_TIMEOUT_SECONDS,
+                        timeout=llm_timeout_seconds(),
                     )
                 except Exception as exc:
                     raise OpenAIClientError(f"Failed to initialize {self.name} client: {exc}")
