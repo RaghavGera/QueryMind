@@ -70,6 +70,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- App logs were silently dropped in production: nothing configured logging, so under uvicorn
+  only WARNING+ lines from `app.*` were printed and the per-request
+  `LLM request served provider=... prompt_tokens=...` line never reached the Render logs.
+  `app/main.py` now configures logging from `LOG_LEVEL` (default `INFO`).
 - Hidden retry stacking: the OpenAI SDK retried 429/5xx twice on its own (honouring Retry-After)
   underneath the app's retries, and waited up to 10 minutes per request. SDK retries are now off
   and requests time out after 30 s.

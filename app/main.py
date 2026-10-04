@@ -30,6 +30,13 @@ from app.sql_generator import SQLGenerator
 
 logger = logging.getLogger(__name__)
 
+# Uvicorn only configures its own loggers; without this the app's INFO lines
+# (e.g. "LLM request served provider=...") never reach the Render logs.
+logging.basicConfig(
+    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").strip().upper(), logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 # Initialize FastAPI app
 app = FastAPI(
     title="QueryMind API",
