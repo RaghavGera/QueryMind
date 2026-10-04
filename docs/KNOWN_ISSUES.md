@@ -27,13 +27,17 @@ against the build deployed at commit `3eec66d` (before the Phase 1 changes).
 
 ## Still open
 
+Live eval on 2026-10-04 (`python -m testing.eval_harness` against the build at
+`ee88c74`): **41/41 core questions passed**, including date bucketing, nested
+aggregates, anti-joins, period comparison, top-N per group and insert/update
+previews (all previously listed here as open).
+
 | Issue | Notes |
 |---|---|
-| Date bucketing ("monthly revenue") | Generator has no `date_trunc`; question `gap-monthly-revenue` tracked as a `known_gap` in the eval set |
-| Nested aggregates ("average order value") | Needs AVG over a per-order SUM (subquery); `gap-average-order-value` |
-| Anti-joins ("customers who never ordered") | Needs `NOT EXISTS` / `LEFT JOIN … IS NULL`; `gap-never-ordered` |
-| Period-over-period comparisons | Phase 2 |
-| Natural-language INSERT/UPDATE | Phase 2 |
+| Latency outliers | Same run: median 3.8 s, p90 9.7 s, but 5/41 requests took 35–40 s. Likely an LLM call hitting the 30 s timeout before failing over; confirm in the Render logs (`LLM request served provider=…`) |
+| No auth / rate limiting | Anyone can call `/query` and spend the LLM quota (Phase 3) |
+| History and saved queries are browser-only | Stored in `localStorage`, not per user (Phase 3) |
+| No usage analytics | Clarification rate, latency, success rate are not recorded server-side (Phase 3) |
 
 ## Owner actions the code cannot do (need your Render/Vercel access)
 
@@ -63,3 +67,9 @@ against the build deployed at commit `3eec66d` (before the Phase 1 changes).
 
 Status of these as of 2026-10-02: `/health` is currently green on the old
 credentials; items 1–4 are **not yet done** (they require dashboard access).
+
+Update 2026-10-04: item 2 confirmed in effect (pushes to `main` reached the live
+backend without a manual deploy — the period-comparison fix went live after the
+push). Item 3 confirmed in effect: `/`, `/app`, `/app/settings`,
+`/architecture`, `/developers` on `https://query-mind-tawny.vercel.app` all
+return 200 with the app shell. Items 1, 4, 5, 6 still open.
