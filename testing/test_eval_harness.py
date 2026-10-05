@@ -73,6 +73,28 @@ def test_first_row_value_mismatch():
     assert check_response({"first_row": {"c": 499}}, 200, OK_BODY)
 
 
+def _india_body(params, where='LOWER("customers"."country") = LOWER(%s)'):
+    return {
+        "status": "success",
+        "sql": f'SELECT "customers"."first_name", "customers"."email"\nFROM "customers"\nWHERE {where}',
+        "params": params,
+        "result": {"columns": ["first_name", "email"], "rows": [{"first_name": "A", "email": "a@x"}]},
+    }
+
+
+def test_first_row_column_may_be_a_filter_instead_of_an_output_column():
+    expect = {"first_row": {"country": "India"}}
+    assert check_response(expect, 200, _india_body(["India"])) == []
+    assert check_response(expect, 200, _india_body(["%india%"], '"customers"."country" ILIKE %s')) == []
+
+
+def test_filter_on_the_wrong_value_or_column_still_fails():
+    expect = {"first_row": {"country": "India"}}
+    assert check_response(expect, 200, _india_body(["Brazil"]))
+    assert check_response(expect, 200, _india_body(["India"], '"customers"."city" = %s'))
+    assert check_response(expect, 200, _india_body([]))
+
+
 def test_non_select_sql_is_rejected():
     body = dict(OK_BODY, sql="DELETE FROM customers")
     assert check_response({}, 200, body)

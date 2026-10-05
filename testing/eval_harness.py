@@ -84,6 +84,15 @@ def _values_equal(actual: Any, expected: Any) -> bool:
     return str(actual).strip().lower() == str(expected).strip().lower()
 
 
+def _filters_on(sql_norm: str, params: Any, column: str, expected: Any) -> bool:
+    """True when the WHERE clause references ``column`` and a bound parameter equals ``expected``."""
+    _, _, where = sql_norm.partition(" where ")
+    if column.lower() not in where:
+        return False
+    values = params if isinstance(params, list) else []
+    return any(_values_equal(str(value).strip("%"), expected) for value in values)
+
+
 def check_response(
     expect: Dict[str, Any],
     http_status: int,
@@ -164,7 +173,12 @@ def check_response(
         for column, expected in first_row_spec.items():
             matches = [key for key in first if column.lower() in key.lower()]
             if not matches:
-                failures.append(f"first row has no column like '{column}' (columns: {list(first)})")
+                # "Show customers from India" may select only names; filtering
+                # on country = 'India' answers it just as correctly.
+                if _filters_on(sql_norm, body.get("params"), column, expected):
+                    continue
+                failures.append(f"first row has no column like '{column}' and the SQL does not filter "
+                                f"{column} on {expected!r} (columns: {list(first)})")
             elif not _values_equal(first[matches[0]], expected):
                 failures.append(f"first row {matches[0]}={first[matches[0]]!r}, expected {expected!r}")
     elif first_row_spec and not rows:
