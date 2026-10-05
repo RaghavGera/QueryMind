@@ -162,7 +162,8 @@ Phase 1 is ready!
     "port": 5432,
     "database": "text_to_sql",
     "connected": true
-  }
+  },
+  "writes_enabled": false
 }
 ```
 
@@ -380,3 +381,18 @@ a `preview` (with the affected-row count for UPDATEs) and a `confirmation_token`
 then executes exactly that statement and rolls back if the affected row count
 changed. With `QUERYMIND_ENABLE_WRITES` unset the preview is returned with
 `status: "blocked"` and nothing can be confirmed. Natural-language DELETE is refused.
+
+A caller can also opt out per request with `"allow_writes": false` (the app's
+Settings page sends this; it defaults to `true` for API callers). A write needs
+**both** the server switch and the caller's opt-in. `GET /health` reports the
+server switch as `"writes_enabled"`.
+
+## Request options for `POST /query`
+
+| Field | Default | Meaning |
+|---|---|---|
+| `question` | required | The natural-language question. |
+| `clarification_context` | `null` | The user's answer to a clarification question. |
+| `strict` | `true` | `false` answers ambiguous questions with the model's best guess and reports the ambiguity in `warnings` instead of asking. Critical ambiguities (e.g. an UPDATE with no WHERE) still block. Settings toggle: *Ask for clarification*. |
+| `allow_writes` | `true` | `false` blocks INSERT/UPDATE for this request (preview only). Settings toggle: *Allow write queries*. |
+| `allow_full_table_write` | `false` | Low-level escape hatch in the generator; a WHERE-less UPDATE is still blocked as a critical ambiguity. |

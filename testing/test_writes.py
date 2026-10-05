@@ -287,10 +287,10 @@ def _call(coro):
     return 200, response
 
 
-def _ask(monkeypatch, db, intent, question="q"):
+def _ask(monkeypatch, db, intent, question="q", **request_fields):
     monkeypatch.setattr(main_module, "SchemaIntrospector", _Introspector)
     monkeypatch.setattr(main_module, "extract_intent", lambda q, c: intent)
-    return _call(main_module.run_query(main_module.QueryRequest(question=question), db))
+    return _call(main_module.run_query(main_module.QueryRequest(question=question, **request_fields), db))
 
 
 def _confirm(db, token):
@@ -330,6 +330,56 @@ def test_update_requires_confirmation_then_executes_once(monkeypatch):
     code, replay = _confirm(db, token)
     assert code == 400 and "already used" in replay["error"]
     assert len(db.writes) == 1
+
+
+def test_user_setting_can_turn_writes_off_even_when_the_server_allows_them(monkeypatch):
+    monkeypatch.setenv("QUERYMIND_ENABLE_WRITES", "true")
+    db = _WriteDB(matching_rows=1)
+    code, body = _ask(monkeypatch, db, _update_intent(), "Change the price of Laptop 1 to 999", allow_writes=False)
+
+    assert code == 200
+    assert body["status"] == "blocked"
+    assert "turned off in Settings" in body["error_message"]
+    assert body["preview"]["affected_rows"] == 1  # still shows what would have changed
+    assert "confirmation_token" not in body
+    assert db.writes == []
+
+
+def test_user_setting_cannot_turn_writes_on_when_the_server_disallows_them(monkeypatch):
+    monkeypatch.delenv("QUERYMIND_ENABLE_WRITES", raising=False)
+    db = _WriteDB(matching_rows=1)
+    code, body = _ask(monkeypatch, db, _update_intent(), "Change the price of Laptop 1 to 999", allow_writes=True)
+
+    assert body["status"] == "blocked"
+    assert "disabled on this deployment" in body["error_message"]
+    assert "confirmation_token" not in body
+
+
+@pytest.mark.parametrize("strict", [True, False])
+def test_clarification_setting_reaches_the_generator(monkeypatch, strict):
+    seen = {}
+    real_generator = main_module.SQLGenerator
+
+    def spy(schema, detector=None, strict=True, **kwargs):
+        seen["strict"] = strict
+        return real_generator(schema, detector, strict=strict, **kwargs)
+
+    monkeypatch.setattr(main_module, "SQLGenerator", spy)
+    _ask(monkeypatch, _WriteDB(), _update_intent(), "Change the price of Laptop 1 to 999", strict=strict)
+    assert seen["strict"] is strict
+
+
+def test_health_reports_whether_writes_are_enabled(monkeypatch):
+    class _HealthyDB:
+        config = type("C", (), {"host": "h", "port": 5432, "database": "d"})()
+
+        def test_connection(self):
+            return True
+
+    monkeypatch.delenv("QUERYMIND_ENABLE_WRITES", raising=False)
+    assert _call(main_module.health_check(_HealthyDB()))[1]["writes_enabled"] is False
+    monkeypatch.setenv("QUERYMIND_ENABLE_WRITES", "true")
+    assert _call(main_module.health_check(_HealthyDB()))[1]["writes_enabled"] is True
 
 
 def test_update_matching_nothing_is_reported(monkeypatch):

@@ -1,3 +1,5 @@
+import { getSettings } from "./settings";
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
 function apiUrl(path) {
@@ -47,15 +49,21 @@ async function request(path, options = {}) {
 }
 
 export async function submitQuestion(question, clarificationContext = "") {
+  const settings = getSettings();
   return request("/query", {
     method: "POST",
     body: JSON.stringify({
       question,
       clarification_context: clarificationContext || null,
-      strict: true,
+      strict: settings.askForClarification,
+      allow_writes: settings.allowWrites,
       allow_full_table_write: false,
     }),
   });
+}
+
+export async function getHealth() {
+  return request("/health");
 }
 
 export async function confirmWrite(confirmationToken) {

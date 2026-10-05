@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Settings toggles now work.** *Ask for clarification* is saved in the browser and sent as
+  `strict` (off: ambiguous questions are answered with the model's guess plus a warning;
+  critical ambiguities still block). *Allow write queries* is sent as the new `allow_writes`
+  request field; a write needs both it and `QUERYMIND_ENABLE_WRITES`, and the toggle is greyed
+  out when the server has writes disabled. *Require a WHERE clause* is shown as always on,
+  which is what the backend enforces. The connection card shows live `/health` data.
+- `GET /health` reports `writes_enabled`.
 - `frontend/vercel.json` SPA rewrite so hard-refreshing `/app`, `/architecture` and
   `/developers` no longer 404s on Vercel.
 - **Eval harness** (`python -m testing.eval_harness`): runs `testing/eval_questions.json`
@@ -70,6 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- Eval check for "Show customers from India." failed a correct answer that filtered on
+  `country = 'India'` without selecting the column. A `first_row` expectation now also passes
+  when the SQL's WHERE clause filters that column on the expected value.
 - Slow requests (35-40 s) when gemini-lite hung: the LLM timeout was 30 s before failing over.
   It is now 12 s by default and configurable with `LLM_TIMEOUT_SECONDS`; the usage log line
   and the failover warning now include how long the call took (`seconds=`).

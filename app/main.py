@@ -96,8 +96,12 @@ def _schema_context(schema: DatabaseSchema) -> dict:
 class QueryRequest(BaseModel):
     question: str
     clarification_context: str | None = None
+    # False: answer ambiguous questions with the best interpretation and report
+    # it as a warning instead of asking (critical ambiguities still block).
     strict: bool = True
     allow_full_table_write: bool = False
+    # The caller's opt-in to writes; a write also needs QUERYMIND_ENABLE_WRITES.
+    allow_writes: bool = True
 
 
 def _error_response(
@@ -219,7 +223,7 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
     succeeded = generated.status.value in {"success", "success_with_warnings"} and generated.sql
 
     if succeeded and structured_intent.query_type in (QueryType.INSERT, QueryType.UPDATE):
-        return _prepare_write(structured_intent, generated, generator, payload, db)
+        return _prepare_write(structured_intent, generated, generator, payload, db, request.allow_writes)
 
     if succeeded and structured_intent.query_type == QueryType.DELETE:
         return {
@@ -268,7 +272,7 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
     return payload
 
 
-def _prepare_write(intent, generated, generator, payload: dict, db: Database) -> dict:
+def _prepare_write(intent, generated, generator, payload: dict, db: Database, allow_writes: bool = True) -> dict:
     """
     Turn a generated INSERT/UPDATE into a confirmation request. Nothing is
     executed here: the caller must POST the token to /query/confirm.
@@ -304,6 +308,15 @@ def _prepare_write(intent, generated, generator, payload: dict, db: Database) ->
             "would have been proposed; nothing was executed."
         )
         payload["writes_enabled"] = False
+        return payload
+
+    if not allow_writes:
+        payload["status"] = "blocked"
+        payload["error_message"] = (
+            "Write queries are turned off in Settings. This is the change that would "
+            "have been proposed; nothing was executed."
+        )
+        payload["writes_enabled"] = True
         return payload
 
     payload["status"] = "needs_confirmation"
@@ -368,7 +381,9 @@ async def health_check(db: Database = Depends(get_db)) -> dict:
             "port": db.config.port,
             "database": db.config.database,
             "connected": is_healthy
-        }
+        },
+        # Lets the UI show whether its "Allow write queries" setting can take effect.
+        "writes_enabled": writes.writes_enabled(),
     }
 
 
