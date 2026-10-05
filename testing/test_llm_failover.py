@@ -323,19 +323,20 @@ def _chain():
     return [(p.name, p.model) for p in client_module.configured_providers()]
 
 
-def test_default_chain_is_lite_then_flash_then_groq(monkeypatch):
+def test_default_chain_is_fastest_first(monkeypatch):
     _set_keys(monkeypatch, "GEMINI_API_KEY", "GROQ_API_KEY")
-    assert client_module.DEFAULT_PROVIDER_ORDER == "gemini-lite,gemini-flash,groq"
+    assert client_module.DEFAULT_PROVIDER_ORDER == "gemini-lite,groq,gemini-lite-alt,gemini-flash"
     assert _chain() == [
-        ("gemini-lite", "gemini-3.1-flash-lite"),
-        ("gemini-flash", "gemini-3.8-flash"),
+        ("gemini-lite", "gemini-3.5-flash-lite"),
         ("groq", "qwen/qwen3.8-27b"),
+        ("gemini-lite-alt", "gemini-3.1-flash-lite"),
+        ("gemini-flash", "gemini-3.8-flash"),
     ]
 
 
-def test_one_gemini_key_enables_both_gemini_entries(monkeypatch):
+def test_one_gemini_key_enables_every_gemini_entry(monkeypatch):
     _set_keys(monkeypatch, "GEMINI_API_KEY")
-    assert [name for name, _ in _chain()] == ["gemini-lite", "gemini-flash"]
+    assert [name for name, _ in _chain()] == ["gemini-lite", "gemini-lite-alt", "gemini-flash"]
 
 
 def test_groq_only_deployment_keeps_working(monkeypatch):
@@ -349,10 +350,10 @@ def test_order_is_configurable_and_unknown_names_are_ignored(monkeypatch):
     assert [name for name, _ in _chain()] == ["groq", "gemini-flash"]
 
 
-def test_gemini_shorthand_expands_to_both_models_in_order(monkeypatch):
+def test_gemini_shorthand_expands_to_every_gemini_model_in_order(monkeypatch):
     _set_keys(monkeypatch, "GEMINI_API_KEY", "GROQ_API_KEY")
     monkeypatch.setenv("LLM_PROVIDER_ORDER", "gemini,groq")
-    assert [name for name, _ in _chain()] == ["gemini-lite", "gemini-flash", "groq"]
+    assert [name for name, _ in _chain()] == ["gemini-lite", "gemini-lite-alt", "gemini-flash", "groq"]
 
 
 @pytest.mark.parametrize("dropped", ["mistral", "cerebras", "openai"])
@@ -367,9 +368,12 @@ def test_dropped_providers_are_not_supported(monkeypatch, dropped):
 def test_model_overrides(monkeypatch):
     _set_keys(monkeypatch, "GEMINI_API_KEY", "GROQ_API_KEY")
     monkeypatch.setenv("GEMINI_LITE_MODEL", "lite-x")
+    monkeypatch.setenv("GEMINI_LITE_ALT_MODEL", "lite-w")
     monkeypatch.setenv("GEMINI_FLASH_MODEL", "flash-y")
     monkeypatch.setenv("GROQ_MODEL", "groq-z")
-    assert _chain() == [("gemini-lite", "lite-x"), ("gemini-flash", "flash-y"), ("groq", "groq-z")]
+    assert _chain() == [
+        ("gemini-lite", "lite-x"), ("groq", "groq-z"), ("gemini-lite-alt", "lite-w"), ("gemini-flash", "flash-y"),
+    ]
 
 
 def test_placeholder_keys_count_as_missing(monkeypatch):

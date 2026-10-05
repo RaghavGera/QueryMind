@@ -60,6 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/KNOWN_ISSUES.md`: observed behaviour per question, owner actions, open gaps.
 
 ### Changed
+- **LLM chain is now `gemini-lite,groq,gemini-lite-alt,gemini-flash`.** `gemini-lite` defaults to
+  `gemini-3.5-flash-lite` (41/41 offline eval, ~1-3 s per call on 2026-10-05); the previous
+  `gemini-3.1-flash-lite` moves to the new `gemini-lite-alt` entry (`GEMINI_LITE_ALT_MODEL`),
+  keeping its separate 500/day quota. Groq moves to second place: Render logs showed it
+  answering in <1 s while 3.1 Flash-Lite returned 503s or timed out. `gemini` in
+  `LLM_PROVIDER_ORDER` now expands to all three Gemini entries.
 - LLM calls retry 429/5xx/connection errors with exponential backoff (honouring
   `Retry-After`); failures map to honest HTTP statuses (429 / 503 / 502) with a structured
   body instead of a traceback. `max_tokens` stays pinned at 800.
@@ -77,6 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- Offline eval (`--offline`) failed every UPDATE-preview question: its fake database returned
+  no rows for the affected-row count. It now reports one matching row.
+- SETUP.md documented `measure_prompt_tokens --provider gemini`, which is not an entry name
+  and exits with an error; it now says `--provider gemini-lite`.
 - Eval check for "Show customers from India." failed a correct answer that filtered on
   `country = 'India'` without selecting the column. A `first_row` expectation now also passes
   when the SQL's WHERE clause filters that column on the expected value.

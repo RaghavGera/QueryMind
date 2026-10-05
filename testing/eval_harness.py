@@ -250,6 +250,9 @@ def build_offline_runner():
 
     class _NoRowsDB:
         def execute_query(self, query, params=None):
+            # The UPDATE preview counts matching rows first; pretend one matches.
+            if "affected_rows" in query:
+                return [{"affected_rows": 1}]
             return []
 
     main_module.SchemaIntrospector = _Introspector

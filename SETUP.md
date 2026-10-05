@@ -268,9 +268,10 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | Variable | Required | Notes |
 |---|---|---|
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | yes | Set **all five**. Setting only `DATABASE_URL` is ignored and silently falls back to `localhost:5432` (this caused an outage once). |
-| `GEMINI_API_KEY`, `GROQ_API_KEY` | at least one | Each provider with a key joins the failover chain; one without a key is skipped silently. `GEMINI_API_KEY` enables both Gemini entries. |
-| `LLM_PROVIDER_ORDER` | no | Try order, default `gemini-lite,gemini-flash,groq` (`gemini` = both Gemini entries). Unknown names are ignored. |
-| `GEMINI_LITE_MODEL` | no | Default `gemini-3.1-flash-lite` (free tier: 500 requests/day). |
+| `GEMINI_API_KEY`, `GROQ_API_KEY` | at least one | Each provider with a key joins the failover chain; one without a key is skipped silently. `GEMINI_API_KEY` enables all three Gemini entries. |
+| `LLM_PROVIDER_ORDER` | no | Try order, default `gemini-lite,groq,gemini-lite-alt,gemini-flash` (`gemini` = all three Gemini entries). Unknown names are ignored. |
+| `GEMINI_LITE_MODEL` | no | Default `gemini-3.5-flash-lite` (free tier: 500 requests/day, 15/minute). |
+| `GEMINI_LITE_ALT_MODEL` | no | Default `gemini-3.1-flash-lite` (free tier: 500 requests/day, 15/minute; separate quota). |
 | `GEMINI_FLASH_MODEL` | no | Default `gemini-3.8-flash` (free tier: 20 requests/day). |
 | `GROQ_MODEL` | no | Default `qwen/qwen3.8-27b`. Older copies of `.env.example` suggested `llama-3.1-70b-versatile`; make sure a stale value is not set. |
 | `LLM_TIMEOUT_SECONDS` | no | Per-request LLM timeout before failing over to the next entry. Default `12`. |
@@ -285,10 +286,15 @@ The Vercel project's **Root Directory must be `frontend/`** so `frontend/vercel.
 
 ## LLM providers, failover and rate limits
 
-All LLM calls go through `app/openai_client.py`. The chain has three entries:
-Gemini 3.1 Flash-Lite, then Gemini 3.8 Flash (both via Google AI Studio,
+All LLM calls go through `app/openai_client.py`. The chain has four entries:
+Gemini 3.5 Flash-Lite, Groq, Gemini 3.1 Flash-Lite, then Gemini 3.8 Flash (the
+Gemini ones via Google AI Studio,
 `https://generativelanguage.googleapis.com/v1beta/openai/`, sharing
-`GEMINI_API_KEY`; Gemini's free-tier quotas are per model), then Groq. Both
+`GEMINI_API_KEY`; Gemini's free-tier quotas are per model). The order follows
+what was measured on 2026-10-05: 3.5 Flash-Lite answered all 41 eval questions
+correctly in ~1-3 s per call; Groq answered live requests in <1 s but has the
+smallest daily budget (~140-150 questions); 3.1 Flash-Lite took ~4 s and often
+returned 503 or hit the timeout; 3.8 Flash allows only 20 requests/day. Both
 providers have free tiers that need no payment method (Mistral and Cerebras
 were dropped because they require one). The Gemini model IDs were checked
 against the API's model list on 2026-10-02; note `gemini-2.5-flash` is still
@@ -334,7 +340,7 @@ question in `testing/test_questions.txt` without calling an API:
 
 ```bash
 python -m testing.measure_prompt_tokens --dry-run
-python -m testing.measure_prompt_tokens --provider gemini   # real usage.prompt_tokens, spends quota
+python -m testing.measure_prompt_tokens --provider gemini-lite   # real usage.prompt_tokens, spends quota
 ```
 
 After switching provider, run the eval harness before trusting it:

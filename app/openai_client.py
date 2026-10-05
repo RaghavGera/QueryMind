@@ -8,10 +8,13 @@ them.
 Provider chain
 --------------
 The chain is a list of *entries* -- a provider plus one model -- tried in
-``LLM_PROVIDER_ORDER`` (default ``gemini-lite,gemini-flash,groq``). Gemini's
-free tier quotas are per model, so its two models are separate entries that
-share ``GEMINI_API_KEY``: Flash-Lite (larger daily quota) first, then Flash.
-``gemini`` in LLM_PROVIDER_ORDER is shorthand for both Gemini entries.
+``LLM_PROVIDER_ORDER`` (default ``gemini-lite,groq,gemini-lite-alt,gemini-flash``).
+Gemini's free-tier quotas are per model, so each Gemini model is a separate
+entry sharing ``GEMINI_API_KEY``. The order follows measured speed and
+reliability (2026-10-05): gemini-3.5-flash-lite answered extraction calls in
+~1-3 s; Groq in <1 s but with the smallest daily budget; gemini-3.1-flash-lite
+took ~4 s and often returned 503 or hung; gemini-3.8-flash allows 20/day.
+``gemini`` in LLM_PROVIDER_ORDER is shorthand for all three Gemini entries.
 
 Entries whose API key is missing are skipped, so a deployment that only sets
 ``GROQ_API_KEY`` keeps working unchanged. Only providers with a free tier that
@@ -24,16 +27,18 @@ of paying a failed round trip every time. The failover policy itself lives in
 
 Entries
 -------
-============  ==============  ==================  =====================  =================
-entry         API key         model override      default model          free tier (owner)
-============  ==============  ==================  =====================  =================
-gemini-lite   GEMINI_API_KEY  GEMINI_LITE_MODEL   gemini-3.1-flash-lite  500 requests/day
-gemini-flash  GEMINI_API_KEY  GEMINI_FLASH_MODEL  gemini-3.8-flash       20 requests/day
-groq          GROQ_API_KEY    GROQ_MODEL          qwen/qwen3.8-27b       200K tokens/day
-============  ==============  ==================  =====================  =================
+===============  ==============  =====================  =====================  ====================
+entry            API key         model override         default model          free tier (owner)
+===============  ==============  =====================  =====================  ====================
+gemini-lite      GEMINI_API_KEY  GEMINI_LITE_MODEL      gemini-3.5-flash-lite  500 req/day, 15/min
+groq             GROQ_API_KEY    GROQ_MODEL             qwen/qwen3.8-27b       200K tokens/day
+gemini-lite-alt  GEMINI_API_KEY  GEMINI_LITE_ALT_MODEL  gemini-3.1-flash-lite  500 req/day, 15/min
+gemini-flash     GEMINI_API_KEY  GEMINI_FLASH_MODEL     gemini-3.8-flash       20 requests/day
+===============  ==============  =====================  =====================  ====================
 
-Gemini model IDs were checked against the API's model list on 2026-10-02
-(gemini-2.5-flash is listed but returns 404 "no longer available to new users").
+Gemini model IDs were checked against the API's model list on 2026-10-02 and
+2026-10-05 (gemini-2.5-flash is listed but returns 404 "no longer available to
+new users"; Live and embedding models do not support chat completions).
 """
 
 import logging
@@ -75,6 +80,10 @@ _GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 PROVIDERS: Dict[str, ProviderSpec] = {
     "gemini-lite": ProviderSpec(
         "gemini-lite", "GEMINI_API_KEY", "GEMINI_LITE_MODEL",
+        _GEMINI_BASE_URL, "gemini-3.5-flash-lite", "auto",
+    ),
+    "gemini-lite-alt": ProviderSpec(
+        "gemini-lite-alt", "GEMINI_API_KEY", "GEMINI_LITE_ALT_MODEL",
         _GEMINI_BASE_URL, "gemini-3.1-flash-lite", "auto",
     ),
     "gemini-flash": ProviderSpec(
@@ -87,9 +96,9 @@ PROVIDERS: Dict[str, ProviderSpec] = {
     ),
 }
 
-DEFAULT_PROVIDER_ORDER = "gemini-lite,gemini-flash,groq"
+DEFAULT_PROVIDER_ORDER = "gemini-lite,groq,gemini-lite-alt,gemini-flash"
 # Shorthands accepted in LLM_PROVIDER_ORDER.
-_ALIASES = {"gemini": ["gemini-lite", "gemini-flash"]}
+_ALIASES = {"gemini": ["gemini-lite", "gemini-lite-alt", "gemini-flash"]}
 # A healthy extraction call takes a few seconds; gemini-lite occasionally hangs
 # and, at 30 s, those requests took 35-40 s end to end (live, 2026-10-04).
 DEFAULT_LLM_TIMEOUT_SECONDS = 12.0
