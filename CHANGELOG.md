@@ -83,6 +83,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- "Could not reach the QueryMind backend" that never cleared: the backend's CORS list only
+  allowed `https://query-mind-tawny.vercel.app`, so the app opened from any other Vercel
+  deployment URL (or a dev server on `127.0.0.1`) was refused (`400 Disallowed CORS origin`),
+  which browsers report as a network failure. These origins are now allowed by pattern
+  (`BACKEND_CORS_ORIGIN_REGEX`), and the error message names the backend and the page origin.
 - Offline eval (`--offline`) failed every UPDATE-preview question: its fake database returned
   no rows for the affected-row count. It now reports one matching row.
 - SETUP.md documented `measure_prompt_tokens --provider gemini`, which is not an entry name

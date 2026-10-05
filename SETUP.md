@@ -277,6 +277,7 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | `LLM_TIMEOUT_SECONDS` | no | Per-request LLM timeout before failing over to the next entry. Default `12`. |
 | `LOG_LEVEL` | no | Python log level for the app (default `INFO`). At `INFO` every request logs `LLM request served provider=... seconds=...`. |
 | `BACKEND_CORS_ORIGINS` | no | Comma-separated; defaults include `http://localhost:5173` and the Vercel URL. |
+| `BACKEND_CORS_ORIGIN_REGEX` | no | Origins matched by pattern as well. Default allows this project's Vercel deployment URLs (`https://query-mind-….vercel.app`) and `http://localhost:<port>` / `http://127.0.0.1:<port>`. Set to an empty string to disable. |
 | `QUERYMIND_ENABLE_WRITES` | no | `true` allows confirmed natural-language INSERT/UPDATE. **Off by default** - leave it off on a public demo database. |
 | `QUERYMIND_CONFIRM_SECRET` | with writes | Long random string; keeps confirmation tokens valid across restarts/instances. |
 

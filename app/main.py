@@ -53,9 +53,18 @@ cors_origins = [
     if origin.strip()
 ]
 
+# Vercel also serves every deployment at its own URL (query-mind-<hash>-....vercel.app,
+# query-mind-git-<branch>-....vercel.app). A browser on one of those, or on a local dev
+# server at 127.0.0.1, was refused by CORS and showed "Could not reach the backend".
+cors_origin_regex = os.getenv(
+    "BACKEND_CORS_ORIGIN_REGEX",
+    r"https://query-mind(-[a-z0-9-]+)?\.vercel\.app|http://(localhost|127\.0\.0\.1):\d+",
+) or None
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
+    allow_origin_regex=cors_origin_regex,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

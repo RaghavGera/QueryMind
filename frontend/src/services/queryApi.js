@@ -24,8 +24,11 @@ async function request(path, options = {}) {
       },
     });
   } catch {
+    // fetch() only throws for network failures and CORS refusals, so name both
+    // ends: a page origin missing from the backend's CORS list looks identical.
     throw new Error(
-      "Could not reach the QueryMind backend. Check VITE_API_BASE_URL and make sure the backend is running.",
+      `Could not reach the QueryMind backend at ${API_BASE} from ${window.location.origin}. ` +
+        "Make sure the backend is running and allows this site's address (CORS).",
     );
   }
 
