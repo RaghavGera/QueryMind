@@ -12,6 +12,11 @@ export function formatCurrency(n) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 }
 
+export function formatDuration(ms) {
+  if (ms === null || ms === undefined) return null;
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
+}
+
 export function relativeTime(iso) {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.round(diffMs / 60000);

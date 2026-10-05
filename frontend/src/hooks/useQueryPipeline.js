@@ -1,11 +1,19 @@
 import { useCallback, useRef, useState } from "react";
 import { confirmWrite, submitQuestion } from "../services/queryApi";
+import { makeSnapshot } from "../services/storedQueries";
 import {
   pipelineStagesInitial,
   pipelineStagesAfterClarification,
 } from "../data/mockData";
 
 const STAGE_MS = 480;
+
+/** Resolve to [value, elapsed ms] -- the backend does not report its own timing. */
+async function timed(promise) {
+  const started = performance.now();
+  const value = await promise;
+  return [value, Math.round(performance.now() - started)];
+}
 
 function animateStages(count, onTick, runTokenRef, token) {
   return new Promise((resolve) => {
@@ -39,12 +47,15 @@ export function useQueryPipeline({ onComplete } = {}) {
   const [clarification, setClarification] = useState(null);
   const [selectedChoice, setSelectedChoice] = useState(null);
   const [sql, setSql] = useState(null);
+  const [params, setParams] = useState([]);
   const [result, setResult] = useState(null);
   const [executionMs, setExecutionMs] = useState(null);
   const [error, setError] = useState(null);
   const [warnings, setWarnings] = useState([]);
   const [confirmation, setConfirmation] = useState(null);
   const [writeResult, setWriteResult] = useState(null);
+  // Set when a stored result is shown instead of a fresh run.
+  const [restored, setRestored] = useState(null);
 
   const runToken = useRef({ token: 0 });
 
@@ -92,6 +103,7 @@ export function useQueryPipeline({ onComplete } = {}) {
     setWarnings([]);
     setConfirmation(null);
     setWriteResult(null);
+    setRestored(null);
     setStatus("idle");
     setQuestion("");
     setProcessingStage(0);
@@ -99,13 +111,18 @@ export function useQueryPipeline({ onComplete } = {}) {
     setClarification(null);
     setSelectedChoice(null);
     setSql(null);
+    setParams([]);
     setResult(null);
     setExecutionMs(null);
     setError(null);
   }, []);
 
+  /*
+   * ``clarification`` re-sends a previously given clarification answer, so
+   * "Run again" repeats exactly the query that produced the result.
+   */
   const ask = useCallback(
-    async (q) => {
+    async (q, { clarification = null } = {}) => {
       const cleanQuestion = String(q || "").trim();
 
       if (!cleanQuestion) return;
@@ -118,9 +135,11 @@ export function useQueryPipeline({ onComplete } = {}) {
       setWarnings([]);
       setConfirmation(null);
       setWriteResult(null);
+      setRestored(null);
       setClarification(null);
-      setSelectedChoice(null);
+      setSelectedChoice(clarification);
       setSql(null);
+      setParams([]);
       setResult(null);
       setExecutionMs(null);
       setError(null);
@@ -142,7 +161,7 @@ export function useQueryPipeline({ onComplete } = {}) {
          *   result generation
          */
 
-        const [, response] = await Promise.all([
+        const [, [response, elapsedMs]] = await Promise.all([
           animateStages(
             pipelineStagesInitial.length,
             setProcessingStage,
@@ -150,7 +169,7 @@ export function useQueryPipeline({ onComplete } = {}) {
             token,
           ),
 
-          submitQuestion(cleanQuestion),
+          timed(submitQuestion(cleanQuestion, clarification || "")),
         ]);
 
         if (runToken.current.token !== token) return;
@@ -216,25 +235,28 @@ export function useQueryPipeline({ onComplete } = {}) {
 
         if (runToken.current.token !== token) return;
 
+        const finalResult = response.result || { columns: [], rows: [] };
+        const durationMs = response.execution_ms ?? elapsedMs;
+
         setWarnings(response.warnings || []);
         setSql(response.sql || null);
-
-        setResult(
-          response.result || {
-            columns: [],
-            rows: [],
-          },
-        );
-
-        setExecutionMs(response.execution_ms ?? null);
+        setParams(response.params || []);
+        setResult(finalResult);
+        setExecutionMs(durationMs);
 
         setStatus("done");
 
         onComplete?.({
           question: cleanQuestion,
-          resolved: null,
+          resolved: clarification,
           status: "success",
-          durationMs: response.execution_ms ?? null,
+          durationMs,
+          snapshot: makeSnapshot({
+            sql: response.sql,
+            params: response.params,
+            result: finalResult,
+            warnings: response.warnings,
+          }),
         });
       } catch (e) {
         if (runToken.current.token !== token) return;
@@ -273,7 +295,7 @@ export function useQueryPipeline({ onComplete } = {}) {
          * No mock lookup
          */
 
-        const [, response] = await Promise.all([
+        const [, [response, elapsedMs]] = await Promise.all([
           animateStages(
             pipelineStagesAfterClarification.length,
             setGeneratingStage,
@@ -281,7 +303,7 @@ export function useQueryPipeline({ onComplete } = {}) {
             token,
           ),
 
-          submitQuestion(question, cleanAnswer),
+          timed(submitQuestion(question, cleanAnswer)),
         ]);
 
         if (runToken.current.token !== token) return;
@@ -317,17 +339,14 @@ export function useQueryPipeline({ onComplete } = {}) {
           );
         }
 
+        const finalResult = response.result || { columns: [], rows: [] };
+        const durationMs = response.execution_ms ?? elapsedMs;
+
         setWarnings(response.warnings || []);
         setSql(response.sql || null);
-
-        setResult(
-          response.result || {
-            columns: [],
-            rows: [],
-          },
-        );
-
-        setExecutionMs(response.execution_ms ?? null);
+        setParams(response.params || []);
+        setResult(finalResult);
+        setExecutionMs(durationMs);
 
         setStatus("done");
 
@@ -335,7 +354,13 @@ export function useQueryPipeline({ onComplete } = {}) {
           question,
           resolved: cleanAnswer,
           status: "success",
-          durationMs: response.execution_ms ?? null,
+          durationMs,
+          snapshot: makeSnapshot({
+            sql: response.sql,
+            params: response.params,
+            result: finalResult,
+            warnings: response.warnings,
+          }),
         });
       } catch (e) {
         if (runToken.current.token !== token) return;
@@ -365,11 +390,13 @@ export function useQueryPipeline({ onComplete } = {}) {
       setWriteResult(response);
       setStatus("executed");
 
+      // A write has no result rows to reopen, so no snapshot.
       onComplete?.({
         question,
-        resolved: null,
+        resolved: selectedChoice,
         status: "success",
         durationMs: null,
+        snapshot: null,
       });
     } catch (e) {
       if (runToken.current.token !== token) return;
@@ -377,7 +404,35 @@ export function useQueryPipeline({ onComplete } = {}) {
       setError(e?.message || "The change could not be applied.");
       setStatus("error");
     }
-  }, [confirmation, question, onComplete]);
+  }, [confirmation, question, selectedChoice, onComplete]);
+
+  /** Show a stored result (history or saved) without calling the backend. */
+  const restore = useCallback((entry, source) => {
+    const snapshot = entry?.snapshot;
+    if (!snapshot) return false;
+
+    runToken.current.token += 1;
+
+    setQuestion(entry.question);
+    setSelectedChoice(entry.resolved || null);
+    setClarification(null);
+    setConfirmation(null);
+    setWriteResult(null);
+    setError(null);
+    setWarnings(snapshot.warnings || []);
+    setSql(snapshot.sql);
+    setParams(snapshot.params || []);
+    setResult({ columns: snapshot.columns, rows: snapshot.rows });
+    setExecutionMs(entry.durationMs ?? null);
+    setRestored({
+      source,
+      at: entry.executedAt || entry.savedAt || null,
+      shownRows: snapshot.rows.length,
+      totalRows: snapshot.totalRows ?? snapshot.rows.length,
+    });
+    setStatus("done");
+    return true;
+  }, []);
 
   return {
     status,
@@ -387,16 +442,19 @@ export function useQueryPipeline({ onComplete } = {}) {
     clarification,
     selectedChoice,
     sql,
+    params,
     result,
     executionMs,
     error,
     warnings,
     confirmation,
     writeResult,
+    restored,
 
     ask,
     confirm,
     selectClarification,
     reset,
+    restore,
   };
 }

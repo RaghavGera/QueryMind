@@ -26,7 +26,6 @@ export default function SettingsPage() {
 
   useEffect(() => {
     let active = true;
-    setHealth(null);
     getHealth()
       .then((body) => active && setHealth(body))
       .catch((error) => active && setHealth({ error: error.message }));
@@ -82,7 +81,12 @@ export default function SettingsPage() {
             <p className="text-state-danger">
               {health.error} If the backend was just deployed or was idle, it can take about a minute to start.
             </p>
-            <button onClick={() => setAttempt((n) => n + 1)} className="btn-ghost shrink-0 !px-2 !py-1 text-xs">
+            <button
+              onClick={() => {
+                setHealth(null);
+                setAttempt((n) => n + 1);
+              }}
+              className="btn-ghost shrink-0 !px-2 !py-1 text-xs">
               Retry
             </button>
           </div>

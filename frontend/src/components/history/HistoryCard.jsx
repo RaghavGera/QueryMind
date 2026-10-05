@@ -1,12 +1,21 @@
 import { motion } from "framer-motion";
-import { RotateCcw, Copy, Trash2 } from "lucide-react";
+import { FolderOpen, RefreshCcw, Trash2 } from "lucide-react";
 import { Badge } from "../ui/Surfaces";
-import { relativeTime } from "../../lib/utils";
+import { formatDuration, relativeTime } from "../../lib/utils";
 
 const statusTone = { success: "success", clarification: "warning", failed: "danger" };
 const statusLabel = { success: "Successful", clarification: "Clarification required", failed: "Failed" };
 
-export default function HistoryCard({ entry, onReopen, onDuplicate, onDelete }) {
+/*
+ * One stored query, used by Query History and Saved Queries.
+ *   Reopen  shows the stored result without calling the backend
+ *   Re-run  puts the question in the Ask box (the user submits it)
+ */
+export default function HistoryCard({ entry, onReopen, onRerun, onDelete, deleteLabel = "Delete" }) {
+  const snapshot = entry.snapshot;
+  const when = entry.savedAt || entry.executedAt;
+  const rowCount = snapshot ? snapshot.totalRows ?? snapshot.rows.length : 0;
+
   return (
     <motion.div
       layout
@@ -18,20 +27,32 @@ export default function HistoryCard({ entry, onReopen, onDuplicate, onDelete }) 
       <div className="min-w-0">
         <p className="truncate text-sm font-medium text-ink">{entry.question}</p>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-dim">
-          <Badge tone={statusTone[entry.status]}>{statusLabel[entry.status]}</Badge>
-          {entry.resolved && <span>Resolved: {entry.resolved}</span>}
-          <span>{relativeTime(entry.executedAt)}</span>
-          {entry.durationMs && <span>{entry.durationMs}ms</span>}
+          {entry.status && <Badge tone={statusTone[entry.status]}>{statusLabel[entry.status]}</Badge>}
+          {entry.resolved && <span>Clarified: {entry.resolved}</span>}
+          {snapshot && <span>{rowCount} row{rowCount === 1 ? "" : "s"}</span>}
+          {when && <span>{entry.savedAt ? "Saved " : ""}{relativeTime(when)}</span>}
+          {entry.durationMs != null && <span>{formatDuration(entry.durationMs)}</span>}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <button onClick={() => onReopen(entry)} className="btn-ghost" title="Reopen">
-          <RotateCcw size={14} />
+        <button
+          onClick={() => onReopen(entry)}
+          disabled={!snapshot}
+          className="btn-ghost disabled:cursor-not-allowed disabled:opacity-40"
+          title={snapshot ? "Reopen the stored result (does not run the query)" : "No stored result for this entry"}
+        >
+          <FolderOpen size={14} />
+          <span className="hidden sm:inline">Reopen</span>
         </button>
-        <button onClick={() => onDuplicate(entry)} className="btn-ghost" title="Duplicate">
-          <Copy size={14} />
+        <button
+          onClick={() => onRerun(entry)}
+          className="btn-ghost"
+          title="Put this question in the Ask box to run it again"
+        >
+          <RefreshCcw size={14} />
+          <span className="hidden sm:inline">Re-run</span>
         </button>
-        <button onClick={() => onDelete(entry.id)} className="btn-ghost hover:!text-state-danger" title="Delete">
+        <button onClick={() => onDelete(entry.id)} className="btn-ghost hover:!text-state-danger" title={deleteLabel}>
           <Trash2 size={14} />
         </button>
       </div>

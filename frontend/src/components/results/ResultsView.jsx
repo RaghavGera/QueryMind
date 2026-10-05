@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { Table2, LineChart as LineChartIcon, Inbox } from "lucide-react";
-import { cn } from "../../lib/utils";
+import { cn, formatDuration } from "../../lib/utils";
 import ResultsTable from "./ResultsTable";
 import ResultsChart from "./ResultsChart";
 
@@ -28,7 +28,9 @@ export default function ResultsView({ result, executionMs, dialect = "PostgreSQL
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-ink-dim">
         <span>
-          {rows.length} rows · Executed in {executionMs}ms · {dialect}
+          {[`${rows.length} row${rows.length === 1 ? "" : "s"}`, executionMs != null && `answered in ${formatDuration(executionMs)}`, dialect]
+            .filter(Boolean)
+            .join(" · ")}
         </span>
         {canChart && (
           <div className="flex overflow-hidden rounded-lg border border-line">

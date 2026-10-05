@@ -251,49 +251,6 @@ export const demoResults = {
   signups: signupsByWeek,
 };
 
-export const queryHistory = [
-  {
-    id: "q-1042",
-    question: "Show me last month's best customers",
-    resolved: "Highest total spending",
-    status: "success",
-    executedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
-    durationMs: 182,
-  },
-  {
-    id: "q-1041",
-    question: "What were our top 10 products by revenue?",
-    resolved: null,
-    status: "success",
-    executedAt: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(),
-    durationMs: 145,
-  },
-  {
-    id: "q-1040",
-    question: "Delete inactive customers",
-    resolved: null,
-    status: "clarification",
-    executedAt: new Date(Date.now() - 1000 * 60 * 60 * 26).toISOString(),
-    durationMs: null,
-  },
-  {
-    id: "q-1039",
-    question: "Which region generated the most revenue this quarter?",
-    resolved: null,
-    status: "success",
-    executedAt: new Date(Date.now() - 1000 * 60 * 60 * 50).toISOString(),
-    durationMs: 211,
-  },
-  {
-    id: "q-1038",
-    question: "Show orders from a customer that doesn't exist",
-    resolved: null,
-    status: "failed",
-    executedAt: new Date(Date.now() - 1000 * 60 * 60 * 72).toISOString(),
-    durationMs: 64,
-  },
-];
-
 export const architectureSteps = [
   { key: "question", label: "User Question", detail: "The raw natural-language question, exactly as typed." },
   { key: "intent", label: "Intent Extractor", detail: "An LLM maps the question onto tables, columns, filters, and aggregations." },

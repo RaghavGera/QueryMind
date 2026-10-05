@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Saved queries.** Results have a Save / Saved toggle; the Saved Queries tab lists them with
+  Reopen, Re-run and Remove. Stored in the browser (`localStorage`), like history.
+- **Query history Reopen and Re-run.** History entries now keep a snapshot of the result (SQL,
+  parameters, warnings and up to 200 rows). *Reopen* shows it without calling the backend, with a
+  "stored result, not re-run" banner and a Run again button. *Re-run* (formerly Duplicate) puts
+  the question in the Ask box without submitting it. Entries without a snapshot (writes, entries
+  from older builds) cannot be reopened. When browser storage is full the oldest snapshots are
+  dropped first. Frontend storage tests: `npm test` (Node's built-in runner, no new dependencies).
 - **Settings toggles now work.** *Ask for clarification* is saved in the browser and sent as
   `strict` (off: ambiguous questions are answered with the model's guess plus a warning;
   critical ambiguities still block). *Allow write queries* is sent as the new `allow_writes`
@@ -83,11 +91,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
-- "Could not reach the QueryMind backend" that never cleared: the backend's CORS list only
-  allowed `https://query-mind-tawny.vercel.app`, so the app opened from any other Vercel
-  deployment URL (or a dev server on `127.0.0.1`) was refused (`400 Disallowed CORS origin`),
-  which browsers report as a network failure. These origins are now allowed by pattern
-  (`BACKEND_CORS_ORIGIN_REGEX`), and the error message names the backend and the page origin.
+- Query history Reopen and Duplicate only navigated to an empty Ask page.
+- Query history showed five fake demo entries (and saved them into the browser's storage once a
+  real query ran). The demo data is removed and those entries are filtered out of stored history.
+- "Run again" after a clarified question asked the clarification again; it now resends the answer.
+- Results said "Executed in ms" (the backend sends no timing); they now show the measured
+  request time ("answered in 3.2 s"). Also "1 rows" -> "1 row".
+- History and saved ids were `Date.now()` only, so two entries created in the same millisecond
+  shared an id and deleting one deleted both.
+- `index.html` did not link the existing `favicon.svg`, so browsers requested a missing
+  `/favicon.ico` (404 in the console).
+- CORS only allowed `https://query-mind-tawny.vercel.app`, so the app opened from any other
+  Vercel deployment URL (or a dev server on `127.0.0.1`) was refused (`400 Disallowed CORS
+  origin`), which browsers report as a network failure. These origins are now allowed by
+  pattern (`BACKEND_CORS_ORIGIN_REGEX`), and the error message names the backend and the page
+  origin. (A Settings page stuck on "Unreachable" in Brave was a different cause: Brave
+  Shields' tracker blocking stops the cross-site `GET /health` call.)
 - Offline eval (`--offline`) failed every UPDATE-preview question: its fake database returned
   no rows for the affected-row count. It now reports one matching row.
 - SETUP.md documented `measure_prompt_tokens --provider gemini`, which is not an entry name

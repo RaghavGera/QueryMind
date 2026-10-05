@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ArrowRight, Sparkles } from "lucide-react";
 import { cn } from "../../lib/utils";
 
-export default function QueryInput({ onSubmit, disabled, initialValue = "" }) {
+export default function QueryInput({ onSubmit, disabled, initialValue = "", autoFocus = false }) {
   const [value, setValue] = useState(initialValue);
 
   const submit = () => {
@@ -21,6 +21,7 @@ export default function QueryInput({ onSubmit, disabled, initialValue = "" }) {
       <input
         value={value}
         disabled={disabled}
+        autoFocus={autoFocus}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}
         placeholder="Ask anything about your data..."

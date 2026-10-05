@@ -1,38 +1,28 @@
-import { queryHistory } from "../data/mockData";
+import { readList, writeList } from "./storedQueries.js";
 
 const STORAGE_KEY = "querymind.history";
+const MAX_ENTRIES = 50;
+
+// Demo entries that earlier builds showed (and then saved) as if they were
+// real history. They never had results, so they are filtered out.
+const DEMO_IDS = new Set(["q-1038", "q-1039", "q-1040", "q-1041", "q-1042"]);
 
 function load() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {
-    // fall through to seed data
-  }
-  return queryHistory;
-}
-
-function save(list) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch {
-    // best-effort only
-  }
+  return readList(STORAGE_KEY).filter((entry) => !DEMO_IDS.has(entry.id));
 }
 
 export async function getHistory() {
-  await new Promise((r) => setTimeout(r, 200));
   return load();
 }
 
+export function getHistoryEntry(id) {
+  return load().find((entry) => entry.id === id) || null;
+}
+
 export async function addHistoryEntry(entry) {
-  const list = [entry, ...load()];
-  save(list);
-  return list;
+  return writeList(STORAGE_KEY, [entry, ...load()].slice(0, MAX_ENTRIES));
 }
 
 export async function deleteHistoryEntry(id) {
-  const list = load().filter((h) => h.id !== id);
-  save(list);
-  return list;
+  return writeList(STORAGE_KEY, load().filter((entry) => entry.id !== id));
 }

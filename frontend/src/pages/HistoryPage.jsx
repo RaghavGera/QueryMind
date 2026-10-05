@@ -17,14 +17,17 @@ export default function HistoryPage() {
     setItems(await deleteHistoryEntry(id));
   };
 
-  const handleReopen = () => navigate("/app");
-  const handleDuplicate = () => navigate("/app");
+  const handleReopen = (entry) => navigate(`/app?reopen=${encodeURIComponent(entry.id)}`);
+  const handleRerun = (entry) => navigate(`/app?q=${encodeURIComponent(entry.question)}`);
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 px-4 sm:px-6 py-10">
       <div>
         <h1 className="font-display text-2xl font-semibold text-ink">Query history</h1>
-        <p className="mt-1 text-sm text-ink-dim">Every question you've asked, and how it resolved.</p>
+        <p className="mt-1 text-sm text-ink-dim">
+          Every question you've asked in this browser. Reopen shows the stored result; Re-run puts the
+          question back in the Ask box.
+        </p>
       </div>
 
       {!items ? (
@@ -43,7 +46,7 @@ export default function HistoryPage() {
               key={entry.id}
               entry={entry}
               onReopen={handleReopen}
-              onDuplicate={handleDuplicate}
+              onRerun={handleRerun}
               onDelete={handleDelete}
             />
           ))}
