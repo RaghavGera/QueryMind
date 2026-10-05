@@ -21,15 +21,19 @@ export default function SettingsPage() {
   // null while loading; { error } if the backend could not be reached.
   const [health, setHealth] = useState(null);
 
+  // Bumped by "Retry"; the backend may be redeploying or waking from sleep.
+  const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
     let active = true;
+    setHealth(null);
     getHealth()
       .then((body) => active && setHealth(body))
       .catch((error) => active && setHealth({ error: error.message }));
     return () => {
       active = false;
     };
-  }, []);
+  }, [attempt]);
 
   const update = (patch) => setSettings(saveSettings(patch));
 
@@ -50,6 +54,8 @@ export default function SettingsPage() {
   let writesHint = "Every change is previewed and runs only after you confirm it. DELETE is never run.";
   if (writesLocked) {
     writesHint = "Disabled on this server (the backend needs QUERYMIND_ENABLE_WRITES=true).";
+  } else if (health?.error) {
+    writesHint = "Couldn't check whether this server accepts writes. Writes still need it enabled on the backend.";
   } else if (serverWrites === undefined && !health?.error) {
     writesHint = "Checking whether this server accepts writes…";
   }
@@ -71,7 +77,16 @@ export default function SettingsPage() {
             <StatusDot tone={connectionTone} pulse={connected} /> {connectionLabel}
           </div>
         </div>
-        {health?.error && <p className="mt-2 text-xs text-state-danger">{health.error}</p>}
+        {health?.error && (
+          <div className="mt-2 flex items-start justify-between gap-4 text-xs">
+            <p className="text-state-danger">
+              {health.error} If the backend was just deployed or was idle, it can take about a minute to start.
+            </p>
+            <button onClick={() => setAttempt((n) => n + 1)} className="btn-ghost shrink-0 !px-2 !py-1 text-xs">
+              Retry
+            </button>
+          </div>
+        )}
       </Card>
 
       <Card className="p-5">
