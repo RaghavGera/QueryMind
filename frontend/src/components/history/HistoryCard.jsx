@@ -39,20 +39,20 @@ export default function HistoryCard({ entry, onReopen, onRerun, onDelete, delete
           onClick={() => onReopen(entry)}
           disabled={!snapshot}
           className="btn-ghost disabled:cursor-not-allowed disabled:opacity-40"
-          title={snapshot ? "Reopen the stored result (does not run the query)" : "No stored result for this entry"}
+          title={snapshot ? "Reopen" : "Nothing to reopen (no stored result)"}
+          aria-label="Reopen"
         >
           <FolderOpen size={14} />
-          <span className="hidden sm:inline">Reopen</span>
+        </button>
+        <button onClick={() => onRerun(entry)} className="btn-ghost" title="Re-run" aria-label="Re-run">
+          <RefreshCcw size={14} />
         </button>
         <button
-          onClick={() => onRerun(entry)}
-          className="btn-ghost"
-          title="Put this question in the Ask box to run it again"
+          onClick={() => onDelete(entry.id)}
+          className="btn-ghost hover:!text-state-danger"
+          title={deleteLabel}
+          aria-label={deleteLabel}
         >
-          <RefreshCcw size={14} />
-          <span className="hidden sm:inline">Re-run</span>
-        </button>
-        <button onClick={() => onDelete(entry.id)} className="btn-ghost hover:!text-state-danger" title={deleteLabel}>
           <Trash2 size={14} />
         </button>
       </div>
