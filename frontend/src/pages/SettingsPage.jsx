@@ -3,6 +3,7 @@ import { Card } from "../components/ui/Surfaces";
 import { StatusDot } from "../components/ui/Surfaces";
 import { getHealth } from "../services/queryApi";
 import { getSettings, saveSettings } from "../services/settings";
+import PageHeader from "../components/ui/PageHeader";
 
 function Setting({ label, hint, children }) {
   return (
@@ -61,9 +62,9 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-5 px-4 sm:px-6 py-10">
-      <h1 className="font-display text-2xl font-semibold text-ink">Settings</h1>
+      <PageHeader label="Settings" title="How QueryMind behaves." detail="Saved in this browser and sent with every question." />
 
-      <Card className="p-5">
+      <Card className="hud p-5">
         <h2 className="mb-3 text-sm font-medium text-ink">Database connection</h2>
         <div className="flex items-center justify-between rounded-lg border border-line bg-white/[0.02] px-4 py-3 text-sm">
           <div>
@@ -93,7 +94,7 @@ export default function SettingsPage() {
         )}
       </Card>
 
-      <Card className="p-5">
+      <Card className="hud p-5">
         <h2 className="mb-3 text-sm font-medium text-ink">Query behavior</h2>
         <div className="space-y-4 text-sm">
           <Setting

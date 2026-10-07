@@ -11,6 +11,26 @@ This system converts natural language questions into SQL queries through a multi
 - Ambiguity detection and clarification
 - SQL query generation (Phase 4)
 
+**Live:** web app at https://query-mind-tawny.vercel.app (API: https://querymind-crln.onrender.com).
+
+## 🖥️ Web app
+
+React + Vite + Tailwind, in `frontend/`. The public pages are a scroll-driven
+"Neural Observatory": a WebGL universe (three.js / React Three Fiber) behind
+pinned, scroll-scrubbed scenes that walk through the real pipeline with real
+SQL and real numbers from the demo database, plus Lenis smooth scrolling and a
+"warp" transition into the app. The app (`/app`) shares the look with quick,
+unobtrusive motion: ask, clarify, see the SQL and results, history, saved
+queries, the live schema and settings. Reduced-motion and no-WebGL visitors get
+static, fully readable fallbacks.
+
+```bash
+cd frontend && npm install
+npm run dev     # http://localhost:5173 (talks to VITE_API_BASE_URL, e.g. http://127.0.0.1:8000)
+npm test        # unit tests (node --test)
+npm run build
+```
+
 ## 🏗️ Architecture
 
 ```
@@ -135,9 +155,10 @@ text-to-sql/
 
 ### Prerequisites
 
-- Python 3.8+
-- MySQL 8.0+
-- Groq API key (for LLM-based features)
+- Python 3.10+
+- PostgreSQL
+- A Gemini and/or Groq API key (the LLM chain fails over between them; see SETUP.md)
+- Node.js 20.19+ or 22.12+ for the web app (Vite 8)
 
 ### Installation
 
@@ -345,9 +366,11 @@ python testing/test_ambiguity_realworld.py
 - [x] Phase 4: SQL Query Generation
 - [ ] Phase 5: Query Optimization
 - [ ] Phase 6: Result Interpretation
-- [ ] Web UI Interface
-- [ ] API Endpoints
-- [ ] Multi-database support (PostgreSQL, SQLite)
+- [x] Web UI (cinematic landing page + query app)
+- [x] API endpoints (`/query`, `/query/confirm`, `/schema`, `/health`)
+- [x] Period comparisons, top-N per group, nested aggregates, confirmed INSERT/UPDATE
+- [ ] Product hardening (rate limits, usage analytics, CI): see `QueryMind-Next-Batch-Plan.md`
+- [ ] Multi-database support
 
 ## 🤝 Contributing
 
@@ -363,12 +386,12 @@ Raghav
 
 ## 🙏 Acknowledgments
 
-- OpenAI/Groq for LLM capabilities
+- Google Gemini and Groq for LLM capabilities (via the OpenAI-compatible SDK)
 - Pydantic for data validation
-- MySQL for database support
+- PostgreSQL for the database
 
 ---
 
-**Status**: Phase 4 Complete ✅ | Phase 5 Not Started
+**Status**: Phases 0–2 of the build plan complete and verified live; web app redesigned (2026-10-07).
 
-Last Updated: 2026-08-27
+Last Updated: 2026-10-07

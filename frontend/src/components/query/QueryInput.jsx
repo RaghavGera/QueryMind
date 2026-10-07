@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 export default function QueryInput({ onSubmit, disabled, initialValue = "", autoFocus = false }) {
@@ -13,11 +13,14 @@ export default function QueryInput({ onSubmit, disabled, initialValue = "", auto
   return (
     <div
       className={cn(
-        "surface-card flex items-center gap-3 px-4 py-3 transition-shadow focus-within:shadow-glow-sm",
-        disabled && "opacity-70"
+        "hud flex items-center gap-3 px-4 py-3 transition-shadow duration-300",
+        "focus-within:border-accent-cyan/40 focus-within:shadow-[0_0_0_1px_rgba(94,234,212,0.25),0_0_40px_-8px_rgba(94,234,212,0.45)]",
+        disabled && "opacity-70",
       )}
     >
-      <Sparkles size={18} className="shrink-0 text-accent-violet" />
+      <span className="select-none font-mono text-lg leading-none text-accent-cyan" aria-hidden="true">
+        ›
+      </span>
       <input
         value={value}
         disabled={disabled}
@@ -25,7 +28,8 @@ export default function QueryInput({ onSubmit, disabled, initialValue = "", auto
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}
         placeholder="Ask anything about your data..."
-        className="flex-1 bg-transparent text-sm text-ink placeholder:text-ink-faint outline-none sm:text-base"
+        aria-label="Your question"
+        className="flex-1 bg-transparent font-display text-[15px] text-ink caret-accent-cyan outline-none placeholder:text-ink-faint sm:text-base"
       />
       <button
         onClick={submit}

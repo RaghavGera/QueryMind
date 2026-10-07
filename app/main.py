@@ -409,7 +409,9 @@ async def get_schema(db: Database = Depends(get_db)) -> dict:
     try:
         introspector = SchemaIntrospector(db)
         schema = introspector.introspect()
-        return schema.to_dict()
+        # The database name lets the UI show the real workspace (and doubles
+        # as its connection check: /health is blocked by some ad blockers).
+        return {"database": db.config.database, **schema.to_dict()}
     except Exception as e:
         return JSONResponse(
             status_code=500,

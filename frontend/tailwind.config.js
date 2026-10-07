@@ -29,6 +29,10 @@ export default {
           indigo: "#6366f1",
           cyan: "#5eead4",
           glow: "#a78bfa",
+          // "Needs attention" only (ambiguity, clarification).
+          amber: "#fbbf24",
+          // Results / answers.
+          magenta: "#f472b6",
         },
         state: {
           success: "#4ade80",
@@ -68,11 +72,48 @@ export default {
           "0%": { backgroundPosition: "-200% 0" },
           "100%": { backgroundPosition: "200% 0" },
         },
+        caret: {
+          "0%,49%": { opacity: 1 },
+          "50%,100%": { opacity: 0 },
+        },
+        glitch: {
+          "0%,100%": { transform: "translate(0)", clipPath: "inset(0 0 0 0)" },
+          "20%": { transform: "translate(-2px, 1px)", clipPath: "inset(10% 0 55% 0)" },
+          "40%": { transform: "translate(2px, -1px)", clipPath: "inset(60% 0 8% 0)" },
+          "60%": { transform: "translate(-1px, 0)", clipPath: "inset(30% 0 35% 0)" },
+          "80%": { transform: "translate(1px, 1px)", clipPath: "inset(75% 0 2% 0)" },
+        },
+        aurora: {
+          "0%,100%": { transform: "translate3d(0,0,0) scale(1)" },
+          "50%": { transform: "translate3d(4%,-3%,0) scale(1.08)" },
+        },
+        beam: {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(400%)" },
+        },
+        grain: {
+          "0%,100%": { transform: "translate(0,0)" },
+          "25%": { transform: "translate(-3%,2%)" },
+          "50%": { transform: "translate(2%,-3%)" },
+          "75%": { transform: "translate(-2%,-1%)" },
+        },
+        scrollCue: {
+          "0%": { transform: "scaleY(0)", transformOrigin: "top" },
+          "45%": { transform: "scaleY(1)", transformOrigin: "top" },
+          "55%": { transform: "scaleY(1)", transformOrigin: "bottom" },
+          "100%": { transform: "scaleY(0)", transformOrigin: "bottom" },
+        },
       },
       animation: {
         "pulse-glow": "pulseGlow 2.4s ease-in-out infinite",
         "fade-up": "fadeUp 0.5s ease both",
         shimmer: "shimmer 2.5s linear infinite",
+        caret: "caret 1s steps(1) infinite",
+        glitch: "glitch 0.45s steps(2) infinite",
+        aurora: "aurora 18s ease-in-out infinite",
+        beam: "beam 1.6s cubic-bezier(0.4,0,0.2,1) infinite",
+        grain: "grain 1.2s steps(4) infinite",
+        "scroll-cue": "scrollCue 2.2s cubic-bezier(0.65,0,0.35,1) infinite",
       },
     },
   },

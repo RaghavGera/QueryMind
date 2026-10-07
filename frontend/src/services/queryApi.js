@@ -12,7 +12,7 @@ function apiUrl(path) {
   return `${API_BASE}${path}`;
 }
 
-async function request(path, options = {}) {
+export async function request(path, options = {}) {
   let response;
 
   try {

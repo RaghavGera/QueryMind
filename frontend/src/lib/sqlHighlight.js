@@ -7,6 +7,7 @@ const KEYWORDS = [
 
 const KEYWORD_RE = new RegExp(`\\b(${KEYWORDS.join("|")})\\b`, "gi");
 const STRING_RE = /'[^']*'/g;
+const IDENT_RE = /"[^"]*"/g;
 const NUMBER_RE = /\b\d+(\.\d+)?\b/g;
 const FUNC_RE = /\b([a-zA-Z_][a-zA-Z0-9_]*)(?=\()/g;
 
@@ -19,7 +20,7 @@ export function highlightSqlLine(line) {
   let cursor = 0;
 
   const matches = [];
-  for (const re of [STRING_RE, KEYWORD_RE, NUMBER_RE, FUNC_RE]) {
+  for (const re of [STRING_RE, IDENT_RE, KEYWORD_RE, NUMBER_RE, FUNC_RE]) {
     re.lastIndex = 0;
     let m;
     while ((m = re.exec(line))) {
@@ -41,6 +42,7 @@ export function highlightSqlLine(line) {
     if (m.start > cursor) tokens.push({ text: line.slice(cursor, m.start), cls: "text-ink" });
     let cls = "text-ink";
     if (m.re === STRING_RE) cls = "text-accent-cyan";
+    else if (m.re === IDENT_RE) cls = "text-[#c9c2ff]";
     else if (m.re === KEYWORD_RE) cls = "text-accent-violet font-medium";
     else if (m.re === NUMBER_RE) cls = "text-state-warning";
     else if (m.re === FUNC_RE) cls = "text-accent-glow";
@@ -50,4 +52,23 @@ export function highlightSqlLine(line) {
   if (cursor < line.length) tokens.push({ text: line.slice(cursor), cls: "text-ink" });
 
   return tokens.length ? tokens : [{ text: line, cls: "text-ink" }];
+}
+
+const JSON_TOKEN = /("(?:[^"\\]|\\.)*")(\s*:)?|\b(true|false|null)\b|-?\b\d+(?:\.\d+)?\b/g;
+
+/** Tokenize one line of pretty-printed JSON into { text, cls } segments. */
+export function highlightJsonLine(line) {
+  const tokens = [];
+  let cursor = 0;
+  for (const m of line.matchAll(JSON_TOKEN)) {
+    if (m.index > cursor) tokens.push({ text: line.slice(cursor, m.index), cls: "text-ink-dim" });
+    let cls = "text-accent-magenta"; // numbers
+    if (m[1] && m[2]) cls = "text-[#c9c2ff]"; // keys
+    else if (m[1]) cls = "text-accent-cyan"; // strings
+    else if (m[3]) cls = "text-accent-amber"; // true / false / null
+    tokens.push({ text: m[0], cls });
+    cursor = m.index + m[0].length;
+  }
+  if (cursor < line.length) tokens.push({ text: line.slice(cursor), cls: "text-ink-dim" });
+  return tokens.length ? tokens : [{ text: line, cls: "text-ink-dim" }];
 }

@@ -23,9 +23,9 @@ export default function ConfirmationPanel({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="surface-card p-5"
+      className="hud hud-amber p-5"
     >
-      <p className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-accent-glow">
+      <p className="mb-2 flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.22em] text-accent-amber">
         <ShieldCheck size={14} />
         Confirm before anything changes
       </p>
@@ -54,7 +54,7 @@ export default function ConfirmationPanel({
         </p>
       )}
 
-      <pre className="mb-4 overflow-x-auto rounded-xl border border-line bg-white/[0.03] p-3 text-xs text-ink-dim">
+      <pre className="mb-4 overflow-x-auto rounded-xl border border-white/[0.08] bg-white/[0.03] p-3 font-mono text-xs text-ink-dim">
         {sql}
         {params.length > 0 && `\n-- params: ${JSON.stringify(params)}`}
       </pre>

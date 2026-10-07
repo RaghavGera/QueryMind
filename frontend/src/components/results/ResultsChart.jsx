@@ -12,9 +12,15 @@ export default function ResultsChart({ columns, rows, kind = "bar" }) {
   const ChartComp = kind === "line" ? LineChart : BarChart;
 
   return (
-    <div className="h-64 w-full rounded-xl border border-line p-3 sm:h-72 sm:p-4">
+    <div className="surface-card h-64 w-full p-3 sm:h-72 sm:p-4">
       <ResponsiveContainer width="100%" height="100%">
         <ChartComp data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 8 }}>
+          <defs>
+            <linearGradient id="qm-bar" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#f472b6" />
+              <stop offset="100%" stopColor="#8b7bff" />
+            </linearGradient>
+          </defs>
           <CartesianGrid stroke="rgba(255,255,255,0.06)" vertical={false} />
           <XAxis
             dataKey={xKey}
@@ -32,9 +38,9 @@ export default function ResultsChart({ columns, rows, kind = "bar" }) {
             cursor={{ fill: "rgba(255,255,255,0.04)" }}
           />
           {kind === "line" ? (
-            <Line type="monotone" dataKey={yKey} stroke="#8b7bff" strokeWidth={2} dot={{ r: 3 }} />
+            <Line type="monotone" dataKey={yKey} stroke="#5eead4" strokeWidth={2} dot={{ r: 3, fill: "#5eead4" }} animationDuration={800} />
           ) : (
-            <Bar dataKey={yKey} fill="#8b7bff" radius={[6, 6, 0, 0]} />
+            <Bar dataKey={yKey} fill="url(#qm-bar)" radius={[6, 6, 0, 0]} animationDuration={800} />
           )}
         </ChartComp>
       </ResponsiveContainer>

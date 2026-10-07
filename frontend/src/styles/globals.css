@@ -47,7 +47,63 @@ body {
     @apply bg-base-850/80 backdrop-blur-2xl border border-line-strong;
   }
   .surface-card {
-    @apply glass rounded-2xl shadow-card;
+    @apply rounded-2xl border border-white/[0.07] bg-gradient-to-b from-base-800/70 to-base-900/70 backdrop-blur-xl;
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.05) inset,
+      0 24px 60px -28px rgba(0, 0, 0, 0.8),
+      0 0 50px -30px rgba(139, 123, 255, 0.35);
+  }
+  /* HUD panel: surface-card plus sci-fi corner brackets. */
+  .hud {
+    @apply surface-card relative;
+    border-color: rgba(139, 123, 255, 0.16);
+  }
+  .hud::before {
+    --c: rgba(94, 234, 212, 0.6);
+    --l: 14px;
+    --w: 1.5px;
+    content: "";
+    position: absolute;
+    inset: -5px;
+    pointer-events: none;
+    background:
+      linear-gradient(var(--c), var(--c)) top left / var(--l) var(--w),
+      linear-gradient(var(--c), var(--c)) top left / var(--w) var(--l),
+      linear-gradient(var(--c), var(--c)) top right / var(--l) var(--w),
+      linear-gradient(var(--c), var(--c)) top right / var(--w) var(--l),
+      linear-gradient(var(--c), var(--c)) bottom left / var(--l) var(--w),
+      linear-gradient(var(--c), var(--c)) bottom left / var(--w) var(--l),
+      linear-gradient(var(--c), var(--c)) bottom right / var(--l) var(--w),
+      linear-gradient(var(--c), var(--c)) bottom right / var(--w) var(--l);
+    background-repeat: no-repeat;
+  }
+  .hud-amber::before {
+    --c: rgba(251, 191, 36, 0.7);
+  }
+  .hud-amber {
+    border-color: rgba(251, 191, 36, 0.22);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.05) inset,
+      0 24px 60px -28px rgba(0, 0, 0, 0.8),
+      0 0 60px -26px rgba(251, 191, 36, 0.35);
+  }
+  .hud-label {
+    @apply font-mono text-[11px] font-medium uppercase tracking-[0.22em] text-accent-cyan;
+  }
+  .display-xl {
+    @apply font-display font-semibold tracking-[-0.035em];
+    font-size: clamp(3rem, 8.4vw, 8.75rem);
+    line-height: 0.92;
+  }
+  .display-lg {
+    @apply font-display font-semibold tracking-[-0.03em];
+    font-size: clamp(2.25rem, 4.8vw, 4.75rem);
+    line-height: 0.98;
+  }
+  .display-md {
+    @apply font-display font-semibold tracking-[-0.02em];
+    font-size: clamp(1.75rem, 3vw, 2.75rem);
+    line-height: 1.05;
   }
   .btn-primary {
     @apply inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-b from-accent-violet to-accent-indigo
@@ -81,10 +137,103 @@ body {
     background-clip: text;
     color: transparent;
   }
+  .text-gradient-neon {
+    background: linear-gradient(90deg, #ffffff 0%, #c9c2ff 42%, #5eead4 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
   .text-gradient-accent {
     background: linear-gradient(90deg, #a78bfa 0%, #5eead4 100%);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Cinematic overlays (marketing pages). All decorative, never clickable. */
+/* ------------------------------------------------------------------ */
+.fx-vignette {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 50%, rgba(0, 0, 0, 0.7) 100%);
+}
+.fx-scanlines {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 3px);
+  mix-blend-mode: overlay;
+}
+.fx-grain {
+  position: fixed;
+  inset: -50%;
+  pointer-events: none;
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  animation: grain 1.2s steps(4) infinite;
+}
+/* CSS nebula: background for pages without the WebGL universe, and the
+   fallback when WebGL is unavailable. */
+.fx-nebula {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.fx-nebula::before,
+.fx-nebula::after {
+  content: "";
+  position: absolute;
+  width: 70vmax;
+  height: 70vmax;
+  border-radius: 9999px;
+  filter: blur(60px);
+  opacity: 0.35;
+  animation: aurora 18s ease-in-out infinite;
+}
+.fx-nebula::before {
+  top: -25vmax;
+  left: -15vmax;
+  background: radial-gradient(circle, rgba(139, 123, 255, 0.55), transparent 65%);
+}
+.fx-nebula::after {
+  bottom: -30vmax;
+  right: -20vmax;
+  background: radial-gradient(circle, rgba(94, 234, 212, 0.35), transparent 65%);
+  animation-delay: -9s;
+}
+
+/* Pinned scroll scenes: --len screen-heights of scroll (shorter on phones). */
+.chapter {
+  height: calc(var(--len, 2) * 100svh);
+}
+@media (max-width: 767px) {
+  .chapter {
+    height: calc(var(--len, 2) * 80svh);
+  }
+}
+
+@keyframes grain {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(-3%, 2%); }
+  50% { transform: translate(2%, -3%); }
+  75% { transform: translate(-2%, -1%); }
+}
+@keyframes aurora {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(4%, -3%, 0) scale(1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }

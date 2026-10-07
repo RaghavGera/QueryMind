@@ -8,7 +8,8 @@ import { makeSnapshot, newId, sameQuery } from "../services/storedQueries";
 import { relativeTime } from "../lib/utils";
 import QueryInput from "../components/query/QueryInput";
 import SuggestionChips from "../components/query/SuggestionChips";
-import ProcessingTimeline from "../components/query/ProcessingTimeline";
+import PipelineBeam from "../components/query/PipelineBeam";
+import ScrambleText from "../motion/ScrambleText";
 import ClarificationPanel from "../components/clarification/ClarificationPanel";
 import ConfirmationPanel from "../components/clarification/ConfirmationPanel";
 import SqlPanel from "../components/sql/SqlPanel";
@@ -34,8 +35,7 @@ export default function Dashboard() {
   const {
     status,
     question,
-    processingStage,
-    generatingStage,
+    startedAt,
     clarification,
     selectedChoice,
     sql,
@@ -132,12 +132,17 @@ export default function Dashboard() {
           className="flex min-h-[60vh] flex-col items-center justify-center gap-6 text-center"
         >
           <div>
-            <h1 className="font-display text-2xl font-semibold text-ink sm:text-3xl">
-              Ask anything about your data
-            </h1>
-            <p className="mt-2 text-ink-dim">
-              QueryMind will clarify anything genuinely ambiguous before it
-              runs.
+            <p className="hud-label mb-4">Query console</p>
+            <ScrambleText
+              as="h1"
+              text="Ask anything about your data."
+              trigger="mount"
+              duration={900}
+              className="display-md block"
+              innerClassName="text-gradient"
+            />
+            <p className="mt-3 text-ink-dim">
+              QueryMind will clarify anything genuinely ambiguous before it runs.
             </p>
           </div>
           <div className="w-full max-w-xl space-y-4">
@@ -184,10 +189,7 @@ export default function Dashboard() {
           </div>
 
           {status === "processing" && (
-            <ProcessingTimeline
-              stages={pipelineStagesInitial}
-              activeIndex={processingStage}
-            />
+            <PipelineBeam stages={pipelineStagesInitial} startedAt={startedAt} />
           )}
 
           {status === "clarifying" && clarification && (
@@ -217,10 +219,7 @@ export default function Dashboard() {
           )}
 
           {status === "generating" && (
-            <ProcessingTimeline
-              stages={pipelineStagesAfterClarification}
-              activeIndex={generatingStage}
-            />
+            <PipelineBeam stages={pipelineStagesAfterClarification} startedAt={startedAt} label="Resolving" />
           )}
 
           {status === "error" && (

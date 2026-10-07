@@ -21,9 +21,9 @@ export default function ClarificationPanel({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="surface-card p-5"
+      className="hud hud-amber p-5"
     >
-      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-accent-glow">
+      <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.22em] text-accent-amber">
         I need one detail
       </p>
 
@@ -43,7 +43,7 @@ export default function ClarificationPanel({
           onChange={(e) => setAnswer(e.target.value)}
           disabled={!!selectedId}
           placeholder="Type your clarification..."
-          className="min-w-0 flex-1 rounded-xl border border-line bg-white/[0.03] px-4 py-3 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-accent-violet/60"
+          className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-ink caret-accent-amber outline-none placeholder:text-ink-faint focus:border-accent-amber/50"
           autoFocus
         />
 

@@ -1,12 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { confirmWrite, submitQuestion } from "../services/queryApi";
 import { makeSnapshot } from "../services/storedQueries";
-import {
-  pipelineStagesInitial,
-  pipelineStagesAfterClarification,
-} from "../data/mockData";
-
-const STAGE_MS = 480;
 
 /** Resolve to [value, elapsed ms] -- the backend does not report its own timing. */
 async function timed(promise) {
@@ -15,35 +9,19 @@ async function timed(promise) {
   return [value, Math.round(performance.now() - started)];
 }
 
-function animateStages(count, onTick, runTokenRef, token) {
-  return new Promise((resolve) => {
-    let i = 0;
-
-    onTick(0);
-
-    const id = setInterval(() => {
-      if (runTokenRef.token !== token) {
-        clearInterval(id);
-        resolve();
-        return;
-      }
-
-      i += 1;
-      onTick(i);
-
-      if (i >= count) {
-        clearInterval(id);
-        resolve();
-      }
-    }, STAGE_MS);
-  });
-}
-
+/*
+ * Statuses:
+ *   idle -> processing (question sent) -> done | clarifying | confirming | error
+ *   clarifying -> generating (answer sent) -> done | clarifying | confirming | error
+ *   confirming -> executing -> executed | error
+ *
+ * Results appear as soon as the backend answers. There is no scripted
+ * "stage" animation: `startedAt` lets the UI show a real elapsed timer.
+ */
 export function useQueryPipeline({ onComplete } = {}) {
   const [status, setStatus] = useState("idle");
   const [question, setQuestion] = useState("");
-  const [processingStage, setProcessingStage] = useState(0);
-  const [generatingStage, setGeneratingStage] = useState(0);
+  const [startedAt, setStartedAt] = useState(null);
   const [clarification, setClarification] = useState(null);
   const [selectedChoice, setSelectedChoice] = useState(null);
   const [sql, setSql] = useState(null);
@@ -81,21 +59,60 @@ export function useQueryPipeline({ onComplete } = {}) {
       return true;
     }
 
-    if (
-      response?.status === "blocked" &&
-      !(response.clarification_questions || []).length
-    ) {
-      setError(
-        response.error_message ||
-          response.preview?.summary ||
-          "This request was blocked.",
-      );
+    if (response?.status === "blocked" && !(response.clarification_questions || []).length) {
+      setError(response.error_message || response.preview?.summary || "This request was blocked.");
       setStatus("error");
       return true;
     }
 
     return false;
   }, []);
+
+  /** Apply a /query response: result, clarification, confirmation or error. */
+  const handleResponse = useCallback(
+    (response, elapsedMs, askedQuestion, resolved) => {
+      if (handleSpecialStatus(response)) return;
+
+      if (response?.status === "needs_clarification" || response?.status === "blocked") {
+        const questions = response?.clarification_questions || [];
+        setClarification({
+          question: questions[0] || response?.clarification?.question || "Please clarify your request.",
+          questions,
+          options: response?.clarification?.options || [],
+        });
+        setStatus("clarifying");
+        return;
+      }
+
+      if (response?.status !== "success" && response?.status !== "success_with_warnings") {
+        throw new Error(response?.error_message || response?.error || "The backend could not generate a valid SQL query.");
+      }
+
+      const finalResult = response.result || { columns: [], rows: [] };
+      const durationMs = response.execution_ms ?? elapsedMs;
+
+      setWarnings(response.warnings || []);
+      setSql(response.sql || null);
+      setParams(response.params || []);
+      setResult(finalResult);
+      setExecutionMs(durationMs);
+      setStatus("done");
+
+      onComplete?.({
+        question: askedQuestion,
+        resolved,
+        status: "success",
+        durationMs,
+        snapshot: makeSnapshot({
+          sql: response.sql,
+          params: response.params,
+          result: finalResult,
+          warnings: response.warnings,
+        }),
+      });
+    },
+    [handleSpecialStatus, onComplete],
+  );
 
   const reset = useCallback(() => {
     runToken.current.token += 1;
@@ -106,8 +123,7 @@ export function useQueryPipeline({ onComplete } = {}) {
     setRestored(null);
     setStatus("idle");
     setQuestion("");
-    setProcessingStage(0);
-    setGeneratingStage(0);
+    setStartedAt(null);
     setClarification(null);
     setSelectedChoice(null);
     setSql(null);
@@ -124,7 +140,6 @@ export function useQueryPipeline({ onComplete } = {}) {
   const ask = useCallback(
     async (q, { clarification = null } = {}) => {
       const cleanQuestion = String(q || "").trim();
-
       if (!cleanQuestion) return;
 
       runToken.current.token += 1;
@@ -132,6 +147,7 @@ export function useQueryPipeline({ onComplete } = {}) {
 
       setQuestion(cleanQuestion);
       setStatus("processing");
+      setStartedAt(Date.now());
       setWarnings([]);
       setConfirmation(null);
       setWriteResult(null);
@@ -143,138 +159,23 @@ export function useQueryPipeline({ onComplete } = {}) {
       setResult(null);
       setExecutionMs(null);
       setError(null);
-      setProcessingStage(0);
-      setGeneratingStage(0);
 
       try {
-        /*
-         * IMPORTANT:
-         *
-         * submitQuestion() now calls the REAL FastAPI /query endpoint.
-         *
-         * The backend is responsible for:
-         *   intent extraction
-         *   ambiguity detection
-         *   SQL generation
-         *   SQL validation
-         *   database execution
-         *   result generation
-         */
-
-        const [, [response, elapsedMs]] = await Promise.all([
-          animateStages(
-            pipelineStagesInitial.length,
-            setProcessingStage,
-            runToken.current,
-            token,
-          ),
-
-          timed(submitQuestion(cleanQuestion, clarification || "")),
-        ]);
-
+        const [response, elapsedMs] = await timed(submitQuestion(cleanQuestion, clarification || ""));
         if (runToken.current.token !== token) return;
-
-        if (handleSpecialStatus(response)) return;
-
-        /*
-         * Backend needs clarification.
-         */
-        if (
-          response?.status === "needs_clarification" ||
-          response?.status === "blocked"
-        ) {
-          const questions = response?.clarification_questions || [];
-
-          setClarification({
-            question:
-              questions[0] ||
-              response?.clarification?.question ||
-              "Please clarify your request.",
-
-            questions,
-
-            /*
-             * Keep this for compatibility with the existing UI.
-             * There are no fake options anymore.
-             */
-            options: response?.clarification?.options || [],
-          });
-
-          setStatus("clarifying");
-          return;
-        }
-
-        /*
-         * Backend failed to generate/validate the query.
-         */
-        if (
-          response?.status !== "success" &&
-          response?.status !== "success_with_warnings"
-        ) {
-          throw new Error(
-            response?.error_message ||
-              response?.error ||
-              "The backend could not generate a valid SQL query.",
-          );
-        }
-
-        /*
-         * The backend already generated AND executed the SQL.
-         *
-         * There is NO runGeneration() call anymore.
-         */
-        setStatus("generating");
-        setGeneratingStage(0);
-
-        await animateStages(
-          pipelineStagesAfterClarification.length,
-          setGeneratingStage,
-          runToken.current,
-          token,
-        );
-
-        if (runToken.current.token !== token) return;
-
-        const finalResult = response.result || { columns: [], rows: [] };
-        const durationMs = response.execution_ms ?? elapsedMs;
-
-        setWarnings(response.warnings || []);
-        setSql(response.sql || null);
-        setParams(response.params || []);
-        setResult(finalResult);
-        setExecutionMs(durationMs);
-
-        setStatus("done");
-
-        onComplete?.({
-          question: cleanQuestion,
-          resolved: clarification,
-          status: "success",
-          durationMs,
-          snapshot: makeSnapshot({
-            sql: response.sql,
-            params: response.params,
-            result: finalResult,
-            warnings: response.warnings,
-          }),
-        });
+        handleResponse(response, elapsedMs, cleanQuestion, clarification);
       } catch (e) {
         if (runToken.current.token !== token) return;
-
-        setError(
-          e?.message || "Could not communicate with the QueryMind backend.",
-        );
-
+        setError(e?.message || "Could not communicate with the QueryMind backend.");
         setStatus("error");
       }
     },
-    [onComplete, handleSpecialStatus],
+    [handleResponse],
   );
 
   const selectClarification = useCallback(
     async (answer) => {
       const cleanAnswer = String(answer || "").trim();
-
       if (!cleanAnswer) return;
 
       runToken.current.token += 1;
@@ -282,97 +183,21 @@ export function useQueryPipeline({ onComplete } = {}) {
 
       setSelectedChoice(cleanAnswer);
       setStatus("generating");
-      setGeneratingStage(0);
+      setStartedAt(Date.now());
       setError(null);
 
       try {
-        /*
-         * Send the ORIGINAL question plus the user's clarification
-         * back through the SAME backend endpoint.
-         *
-         * No resolveClarification()
-         * No resultKey
-         * No mock lookup
-         */
-
-        const [, [response, elapsedMs]] = await Promise.all([
-          animateStages(
-            pipelineStagesAfterClarification.length,
-            setGeneratingStage,
-            runToken.current,
-            token,
-          ),
-
-          timed(submitQuestion(question, cleanAnswer)),
-        ]);
-
+        // The original question plus the user's answer, through the same endpoint.
+        const [response, elapsedMs] = await timed(submitQuestion(question, cleanAnswer));
         if (runToken.current.token !== token) return;
-
-        if (handleSpecialStatus(response)) return;
-
-        if (
-          response?.status === "needs_clarification" ||
-          response?.status === "blocked"
-        ) {
-          const questions = response?.clarification_questions || [];
-
-          setClarification({
-            question: questions[0] || "Please provide more information.",
-
-            questions,
-
-            options: response?.clarification?.options || [],
-          });
-
-          setStatus("clarifying");
-          return;
-        }
-
-        if (
-          response?.status !== "success" &&
-          response?.status !== "success_with_warnings"
-        ) {
-          throw new Error(
-            response?.error_message ||
-              response?.error ||
-              "The backend could not generate a valid SQL query.",
-          );
-        }
-
-        const finalResult = response.result || { columns: [], rows: [] };
-        const durationMs = response.execution_ms ?? elapsedMs;
-
-        setWarnings(response.warnings || []);
-        setSql(response.sql || null);
-        setParams(response.params || []);
-        setResult(finalResult);
-        setExecutionMs(durationMs);
-
-        setStatus("done");
-
-        onComplete?.({
-          question,
-          resolved: cleanAnswer,
-          status: "success",
-          durationMs,
-          snapshot: makeSnapshot({
-            sql: response.sql,
-            params: response.params,
-            result: finalResult,
-            warnings: response.warnings,
-          }),
-        });
+        handleResponse(response, elapsedMs, question, cleanAnswer);
       } catch (e) {
         if (runToken.current.token !== token) return;
-
-        setError(
-          e?.message || "Could not communicate with the QueryMind backend.",
-        );
-
+        setError(e?.message || "Could not communicate with the QueryMind backend.");
         setStatus("error");
       }
     },
-    [question, onComplete, handleSpecialStatus],
+    [question, handleResponse],
   );
 
   const confirm = useCallback(async () => {
@@ -384,7 +209,6 @@ export function useQueryPipeline({ onComplete } = {}) {
 
     try {
       const response = await confirmWrite(confirmation.token);
-
       if (runToken.current.token !== token) return;
 
       setWriteResult(response);
@@ -400,7 +224,6 @@ export function useQueryPipeline({ onComplete } = {}) {
       });
     } catch (e) {
       if (runToken.current.token !== token) return;
-
       setError(e?.message || "The change could not be applied.");
       setStatus("error");
     }
@@ -419,6 +242,7 @@ export function useQueryPipeline({ onComplete } = {}) {
     setConfirmation(null);
     setWriteResult(null);
     setError(null);
+    setStartedAt(null);
     setWarnings(snapshot.warnings || []);
     setSql(snapshot.sql);
     setParams(snapshot.params || []);
@@ -437,8 +261,7 @@ export function useQueryPipeline({ onComplete } = {}) {
   return {
     status,
     question,
-    processingStage,
-    generatingStage,
+    startedAt,
     clarification,
     selectedChoice,
     sql,

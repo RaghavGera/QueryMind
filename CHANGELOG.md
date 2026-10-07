@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Frontend redesign: "Neural Observatory".** The landing page is one continuous, scroll-driven
+  camera flight: a WebGL universe (custom star shader, nebula, the demo schema as a constellation,
+  a query beam, warp streaks) behind 9 pinned, scroll-scrubbed scenes that follow the real
+  pipeline with real wording, SQL and numbers (the generator's actual SQL for "Which region
+  generated the most revenue?"; revenue by country from the demo database; the detector's actual
+  clarification question). Lenis smooth scrolling (new dependency, MIT) on the public pages only,
+  decoding headlines, magnetic CTAs, a chapter rail, film grain/scanlines/vignette, and a
+  full-screen warp transition into the app. Product page: a pinned horizontal feature reel.
+  How it works: a scroll-linked light beam through the 10 stages. Developers: a terminal that
+  types a real `curl` call and streams the real JSON response, plus the real endpoints/options.
+- App restyle to match (HUD panels, command-line input, amber clarification/confirmation panels,
+  big count-up card for single-number answers, staggered table rows, gradient charts, page headers).
+- `GET /schema` also returns `database`; the app's top bar, sidebar and Schema tab use it.
+- Route-level code splitting: main bundle 750 KB -> 308 KB; three.js (827 KB) loads only on the
+  landing page; Lenis only on the public pages.
+- Frontend unit tests for the motion math, text decode, typing/highlight slicing, JSON
+  highlighting and the schema adapter (`npm test`).
 - **Saved queries.** Results have a Save / Saved toggle; the Saved Queries tab lists them with
   Reopen, Re-run and Remove. Stored in the browser (`localStorage`), like history.
 - **Query history Reopen and Re-run.** History entries now keep a snapshot of the result (SQL,
@@ -91,6 +108,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- The Ask flow made you watch scripted progress: three "stages" ticked every 480 ms before the
+  request resolved, and another 2.4 s of stages played *after* the answer arrived. Results now
+  appear as soon as the backend answers (measured locally: 13 ms after the response), and the
+  progress display is an honest beam with a real elapsed timer.
+- Public pages claimed things that do not exist: a JavaScript SDK, scoped API keys, webhooks, a
+  "full API reference", query auditing, per-workspace permissions, encrypted-at-rest credentials,
+  "plain-language summaries" and "read-only by default". All removed or reworded to what the
+  backend actually enforces.
+- The Schema tab showed mock data with invented row counts (4,820 customers; the demo database has
+  500); it now reads the live schema. "sample_ecommerce_db" and a permanently green "Operational"
+  status were hard-coded in the app chrome; both now come from the backend.
+- framer-motion handed scroll-linked opacity to a native ViewTimeline whose progress for pinned
+  (sticky) sections differs from the configured offsets (an element meant to be fully visible sat
+  at 25% opacity); pinned scenes now drive animations from a plain motion value.
 - Query history Reopen and Duplicate only navigated to an empty Ask page.
 - Query history showed five fake demo entries (and saved them into the browser's storage once a
   real query ran). The demo data is removed and those entries are filtered out of stored history.

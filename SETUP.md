@@ -355,6 +355,18 @@ uvicorn app.main:app --reload          # backend on :8000
 cd frontend && npm install && npm run dev   # frontend on :5173
 ```
 
+Test changes here before pushing: open http://localhost:5173/app. The frontend
+talks to the local backend when `frontend/.env.local` contains
+`VITE_API_BASE_URL=http://127.0.0.1:8000`; both servers reload on save. On
+Windows, set `PYTHONIOENCODING=utf-8` if uvicorn's output is redirected to a
+file (the startup messages contain non-ASCII characters).
+
+Before pushing, run everything the deploy depends on:
+
+```bash
+pytest testing/ -q && (cd frontend && npm test && npm run build)
+```
+
 ## Tests
 
 ```bash

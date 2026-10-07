@@ -56,3 +56,9 @@ htmlcov/
 output/
 temp/
 *.tmp
+
+# Local design/preview recordings (not part of the app)
+preview/
+
+# Personal notes
+locallyTest.md

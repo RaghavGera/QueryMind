@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { History as HistoryIcon, Loader2 } from "lucide-react";
 import { getHistory, deleteHistoryEntry } from "../services/historyApi";
 import HistoryCard from "../components/history/HistoryCard";
+import PageHeader from "../components/ui/PageHeader";
 
 export default function HistoryPage() {
   const [items, setItems] = useState(null);
@@ -22,20 +23,18 @@ export default function HistoryPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-4 px-4 sm:px-6 py-10">
-      <div>
-        <h1 className="font-display text-2xl font-semibold text-ink">Query history</h1>
-        <p className="mt-1 text-sm text-ink-dim">
-          Every question you've asked in this browser. Reopen shows the stored result; Re-run puts the
-          question back in the Ask box.
-        </p>
-      </div>
+      <PageHeader
+        label="Query history"
+        title="Everything you've asked."
+        detail="Stored in this browser. Reopen shows the stored result; Re-run puts the question back in the Ask box."
+      />
 
       {!items ? (
         <div className="flex h-40 items-center justify-center gap-2 text-ink-dim">
           <Loader2 size={16} className="animate-spin" /> Loading history...
         </div>
       ) : items.length === 0 ? (
-        <div className="surface-card flex flex-col items-center justify-center gap-2 py-16 text-center">
+        <div className="hud flex flex-col items-center justify-center gap-2 py-16 text-center">
           <HistoryIcon size={22} className="text-ink-faint" />
           <p className="text-sm text-ink-dim">No queries yet. Ask something to get started.</p>
         </div>

@@ -22,7 +22,7 @@ export default function HistoryCard({ entry, onReopen, onRerun, onDelete, delete
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, height: 0 }}
-      className="surface-card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"
+      className="hud flex flex-col gap-3 p-4 transition-shadow duration-300 hover:shadow-[0_0_40px_-16px_rgba(94,234,212,0.55)] sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="min-w-0">
         <p className="truncate text-sm font-medium text-ink">{entry.question}</p>
