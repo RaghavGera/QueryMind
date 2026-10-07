@@ -1,397 +1,238 @@
-# Text-to-SQL Project
+# QueryMind
 
-A comprehensive natural language to SQL query conversion system with ambiguity detection and clarification.
+**Ask your database a question in plain English. QueryMind writes the SQL, runs it, and when your question could mean two things, it asks before it answers.**
 
-## 🎯 Project Overview
-
-This system converts natural language questions into SQL queries through a multi-phase pipeline that includes:
-
-- Database schema introspection
-- Natural language understanding
-- Ambiguity detection and clarification
-- SQL query generation (Phase 4)
-
-**Live:** web app at https://query-mind-tawny.vercel.app (API: https://querymind-crln.onrender.com).
-
-## 🖥️ Web app
-
-React + Vite + Tailwind, in `frontend/`. The public pages are a scroll-driven
-"Neural Observatory": a WebGL universe (three.js / React Three Fiber) behind
-pinned, scroll-scrubbed scenes that walk through the real pipeline with real
-SQL and real numbers from the demo database, plus Lenis smooth scrolling and a
-"warp" transition into the app. The app (`/app`) shares the look with quick,
-unobtrusive motion: ask, clarify, see the SQL and results, history, saved
-queries, the live schema and settings. Reduced-motion and no-WebGL visitors get
-static, fully readable fallbacks.
-
-```bash
-cd frontend && npm install
-npm run dev     # http://localhost:5173 (talks to VITE_API_BASE_URL, e.g. http://127.0.0.1:8000)
-npm test        # unit tests (node --test)
-npm run build
-```
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Natural Language Query                    │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│  Phase 1: Database Schema Introspection                     │
-│  • Analyze database structure                                │
-│  • Extract tables, columns, relationships                    │
-│  • Identify foreign keys and constraints                     │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│  Phase 2: Natural Language Understanding                     │
-│  • Entity Recognition (tables, columns, values)             │
-│  • Intent Extraction (SELECT, COUNT, JOIN, etc.)            │
-│  • Structured Intent Creation                                │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│  Phase 3: Ambiguity Detection & Clarification ✓             │
-│  • Detect dangerous queries (DELETE without WHERE)          │
-│  • Identify unclear references                               │
-│  • Generate clarification questions                          │
-│  • Provide resolution options                                │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────▼───────────────────────────────────────┐
-│  Phase 4: SQL Generation ✓                                   │
-│  • Convert structured intent to SQL                          │
-│  • Apply optimizations                                       │
-│  • Validate query syntax                                     │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-                  SQL Query
-```
-
-## 📁 Project Structure
-
-```
-text-to-sql/
-├── app/                          # Main application code
-│   ├── __init__.py
-│   ├── database.py               # Database connection & management
-│   ├── schema.py                 # Schema introspection (Phase 1)
-│   ├── entity_recognizer.py     # Entity recognition (Phase 2)
-│   ├── intent_extractor.py      # Intent extraction (Phase 2)
-│   ├── models.py                 # Pydantic data models
-│   ├── openai_client.py          # OpenAI/Groq API client
-│   └── ambiguity_detector.py    # Ambiguity detection (Phase 3)
-│
-├── testing/                      # Test suites
-│   ├── test_phase1.py           # Phase 1 tests
-│   ├── test_phase2.py           # Phase 2 tests
-│   ├── test_phase3.py           # Phase 3 tests
-│   └── test_ambiguity_realworld.py  # Real-world question tests
-│
-├── database/                     # Database setup
-│   └── text_to_sql_database.sql # Sample database schema
-│
-├── benchmark/                    # Benchmarks and test data
-│   └── text_to_sql_benchmark_with_sql.xlsx
-│
-├── docs/                         # Documentation
-│   ├── PHASE3_README.md         # Phase 3 documentation
-│   └── PHASE3_REALWORLD_RESULTS.md  # Test results
-│
-├── .env.example                 # Environment variables template
-├── .gitignore                   # Git ignore rules
-├── requirements.txt             # Python dependencies
-├── README.md                    # This file
-└── SETUP.md                     # Setup instructions
-```
-
-## ✨ Features
-
-### Phase 1: Database Schema Introspection ✅
-
-- Automatic schema analysis
-- Foreign key relationship detection
-- Data type identification
-- Primary key discovery
-
-### Phase 2: Natural Language Understanding ✅
-
-- Entity recognition with fuzzy matching
-- Intent extraction using LLM
-- Structured intent creation
-- Confidence scoring
-
-### Phase 3: Ambiguity Detection ✅
-
-- **10 Ambiguity Types Detected:**
-  - Missing required filters (DELETE/UPDATE without WHERE)
-  - Multiple table/column matches
-  - Unclear relationships
-  - Ambiguous time references
-  - Implicit aggregations
-  - Unclear ordering
-  - Multiple join paths
-  - And more...
-
-- **4 Severity Levels:**
-  - 🔴 CRITICAL: Must resolve (prevents data loss)
-  - 🟠 HIGH: Should resolve (prevents wrong results)
-  - 🟡 MEDIUM: Recommended (improves clarity)
-  - 🟢 LOW: Optional (nice to have)
-
-### Phase 4: SQL Generation ✅
-
-- Converts a (clarified) `StructuredIntent` into parameterized SQL via `SQLGenerator`
-- Runs Phase 3's `AmbiguityDetector` as a gatekeeper before generating anything
-- Auto-resolves ambiguities the detector is confident about (single fuzzy table match, etc.)
-- Blocks CRITICAL ambiguities outright (e.g. DELETE/UPDATE with no WHERE) -- no SQL is emitted
-- Asks for clarification on unresolved HIGH/MEDIUM ambiguities instead of guessing
-- Supports SELECT, INSERT, UPDATE, DELETE, COUNT, and aggregate queries with JOINs, GROUP BY, HAVING, ORDER BY, LIMIT/OFFSET
-- All values are passed as query parameters (`%s` placeholders), never string-interpolated
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.10+
-- PostgreSQL
-- A Gemini and/or Groq API key (the LLM chain fails over between them; see SETUP.md)
-- Node.js 20.19+ or 22.12+ for the web app (Vite 8)
-
-### Installation
-
-1. **Clone the repository**
-
-```bash
-git clone <repository-url>
-cd text-to-sql
-```
-
-2. **Install dependencies**
-
-```bash
-pip install -r requirements.txt
-```
-
-3. **Set up database**
-
-```bash
-psql -U postgres -d text_to_sql -f database/text_to_sql_database.sql
-```
-
-4. **Configure environment**
-
-```bash
-cp .env.example .env
-# Edit .env with your credentials
-```
-
-5. **Run tests**
-
-```bash
-# Test Phase 1
-python testing/test_phase1.py
-
-# Test Phase 2
-python testing/test_phase2.py
-
-# Test Phase 3
-python testing/test_phase3.py
-
-# Test with real-world questions
-python testing/test_ambiguity_realworld.py
-```
-
-## 📊 Test Results
-
-### Phase 1 Tests
-
-✅ 5/5 tests passing
-
-- Database connection
-- Schema introspection
-- Table detection
-- Column analysis
-- Foreign key relationships
-
-### Phase 2 Tests
-
-✅ 5/5 tests passing
-
-- OpenAI client initialization
-- Entity recognition
-- Intent extraction
-- Full pipeline integration
-- Pydantic models
-
-### Phase 3 Tests
-
-✅ 9/9 tests passing
-
-- Ambiguity detector initialization
-- Missing filter detection
-- Column ambiguity detection
-- Relationship ambiguity detection
-- Implicit aggregation detection
-- Unclear ordering detection
-- Ambiguity resolution
-- Comprehensive analysis
-- Severity level classification
-
-### Real-World Question Tests
-
-✅ 10/10 questions analyzed successfully
-
-- 40% detected ambiguities requiring clarification
-- 100% accuracy on safety checks
-- 0 false negatives on dangerous queries
-
-## 🔧 Configuration
-
-### Environment Variables (.env)
-
-```env
-# Database Configuration
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=your_password
-DB_NAME=text_to_sql
-
-# Groq API Configuration
-GROQ_API_KEY=your_groq_api_key_here
-# Optional: override the model (default: qwen/qwen3.8-27b)
-# GROQ_MODEL=qwen/qwen3.8-27b
-# Gemini (Google AI Studio) can be added as a failover provider - see SETUP.md
-```
-
-### API Keys
-
-Get a free Groq API key:
-
-1. Visit https://console.groq.com/keys
-2. Sign up for an account
-3. Generate an API key
-4. Add it to your .env file
-
-## 📖 Usage Examples
-
-### Example 1: Basic Query
-
-```python
-from app.database import init_db
-from app.schema import SchemaIntrospector
-from app.ambiguity_detector import AmbiguityDetector
-from app.models import StructuredIntent, QueryType
-
-# Setup
-db = init_db()
-schema = SchemaIntrospector(db).introspect()
-detector = AmbiguityDetector(schema)
-
-# Create intent
-intent = StructuredIntent(
-    query_type=QueryType.SELECT,
-    tables=["customers"],
-    columns=["name", "email"],
-    original_question="Get customer names and emails"
-)
-
-# Check for ambiguities
-result = detector.detect_ambiguities(intent)
-
-if result.can_proceed:
-    print("✓ Query is clear, ready for SQL generation")
-else:
-    print("⚠ Ambiguities detected:")
-    for amb in result.ambiguities:
-        print(f"  - {amb.clarification_question}")
-```
-
-### Example 2: Dangerous Query Detection
-
-```python
-# Dangerous DELETE without WHERE
-intent = StructuredIntent(
-    query_type=QueryType.DELETE,
-    tables=["customers"],
-    original_question="Delete customers"
-)
-
-result = detector.detect_ambiguities(intent)
-# Output: CRITICAL - "Are you sure you want to delete ALL rows?"
-```
-
-## 🧪 Testing
-
-### Run All Tests
-
-```bash
-# Run all phase tests sequentially
-python testing/test_phase1.py && \
-python testing/test_phase2.py && \
-python testing/test_phase3.py
-```
-
-### Run Specific Tests
-
-```bash
-# Phase 1 only
-python testing/test_phase1.py
-
-# Phase 2 only (requires Groq API key)
-python testing/test_phase2.py
-
-# Phase 3 only
-python testing/test_phase3.py
-
-# Real-world questions
-python testing/test_ambiguity_realworld.py
-```
-
-## 📚 Documentation
-
-- [Setup Guide](SETUP.md) - Detailed setup instructions
-- [Phase 3 Documentation](docs/PHASE3_README.md) - Ambiguity detection details
-- [Phase 3 Test Results](docs/PHASE3_REALWORLD_RESULTS.md) - Real-world test analysis
-- [Phase 4 Documentation](docs/PHASE4_README.md) - SQL generation, safety model, and the `/query` endpoint
-
-## 🛣️ Roadmap
-
-- [x] Phase 1: Database Schema Introspection
-- [x] Phase 2: Natural Language Understanding
-- [x] Phase 3: Ambiguity Detection & Clarification
-- [x] Phase 4: SQL Query Generation
-- [ ] Phase 5: Query Optimization
-- [ ] Phase 6: Result Interpretation
-- [x] Web UI (cinematic landing page + query app)
-- [x] API endpoints (`/query`, `/query/confirm`, `/schema`, `/health`)
-- [x] Period comparisons, top-N per group, nested aggregates, confirmed INSERT/UPDATE
-- [ ] Product hardening (rate limits, usage analytics, CI): see `QueryMind-Next-Batch-Plan.md`
-- [ ] Multi-database support
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## 📝 License
-
-This project is licensed under the MIT License.
-
-## 👤 Author
-
-Raghav
-
-## 🙏 Acknowledgments
-
-- Google Gemini and Groq for LLM capabilities (via the OpenAI-compatible SDK)
-- Pydantic for data validation
-- PostgreSQL for the database
+[Live app](https://query-mind-tawny.vercel.app) · [API](https://querymind-crln.onrender.com/health) · [Setup guide](SETUP.md) · [Changelog](CHANGELOG.md)
 
 ---
 
-**Status**: Phases 0–2 of the build plan complete and verified live; web app redesigned (2026-10-07).
+## Why QueryMind
 
-Last Updated: 2026-10-07
+Most text-to-SQL tools hand your question to a language model and run whatever SQL comes back. That works until a question is vague, and then you get a confident, wrong answer. QueryMind is built around three ideas.
+
+- **Ambiguity is a feature.** "Show me the top customers" does not say *top by what*. QueryMind detects that and asks: *"What should 'top' be ranked by? For example total spending, number of orders, or units sold."* It answers only once the question is unambiguous.
+- **The model never writes SQL.** The language model only extracts a structured intent (tables, columns, filters, aggregations). A deterministic generator turns that intent into SQL, checks every identifier against the live schema, and passes every value as a parameter.
+- **Every answer shows its working.** Each result comes with the exact SQL that produced it, ready to copy, re-run or save.
+
+## See it work
+
+A real request against the demo database:
+
+```bash
+curl -X POST https://querymind-crln.onrender.com/query \
+  -H "Content-Type: application/json" \
+  -d '{"question": "Which region generated the most revenue?"}'
+```
+
+The schema has no `region` column, so the extractor maps the word to the closest real one, `customers.country`. It reads "revenue" as arithmetic over real columns. The generator then produces:
+
+```sql
+SELECT "customers"."country", SUM("order_items"."quantity" * "order_items"."unit_price") AS "sum_order_items_quantity_order_items_unit_price"
+FROM "orders"
+INNER JOIN "customers" ON "orders"."customer_id" = "customers"."customer_id"
+INNER JOIN "order_items" ON "orders"."order_id" = "order_items"."order_id"
+GROUP BY "customers"."country"
+ORDER BY SUM("order_items"."quantity" * "order_items"."unit_price") DESC
+LIMIT 1
+```
+
+The response contains that SQL, its parameters, any warnings, and the rows: India, 734,561.
+
+Ask something vague and the response is a clarification question instead. Answer it, and QueryMind runs exactly what you meant.
+
+## How it works
+
+```
+  question
+     │
+     ▼
+  Intent extraction      LLM tool call on a schema-trimmed prompt;   ─ app/intent_extractor.py
+     │                   relative dates resolved to ISO ranges
+     │                   (output: structured intent, never SQL)
+     ▼
+  Conversion             normalizes the intent, computes comparison  ─ app/intent_converter.py
+     │                   periods, validates against the live schema
+     ▼
+  Ambiguity gate         11 ambiguity types, 4 severity levels       ─ app/ambiguity_detector.py
+     │                   critical → blocked · unresolved → ask       ─ app/vague_terms.py
+     │                   confident → auto-resolved, shown as a warning
+     ▼
+  SQL generation         join planning from foreign keys, quoted     ─ app/sql_generator.py
+     │                   identifiers, parameterized values
+     ▼
+  Execution              PostgreSQL via psycopg 3                    ─ app/database.py
+     │
+     ▼
+  answer: SQL + parameters + rows (+ warnings), or a clarification question
+```
+
+Design decisions that matter in production:
+
+- **Structured output only.** The extractor uses function calling, and JSON returned in the message body is accepted as a fallback. Free-form SQL from the model is never executed.
+- **Defense in depth for writes.** INSERT and UPDATE are off by default. When enabled, the backend returns a preview and a signed, single-use confirmation token, and it rolls back if the affected row count changes between preview and execution. An UPDATE without a WHERE clause is blocked. Natural-language DELETE is refused outright.
+- **A resilient model chain.** Requests go through an ordered chain of OpenAI-compatible providers: Gemini 3.5 Flash-Lite → Groq (Qwen) → Gemini 3.1 Flash-Lite → Gemini 3.8 Flash.
+  - Rate limits, 5xx errors and 12-second timeouts move the request to the next entry.
+  - Daily-quota errors park that entry until its quota resets.
+  - Every call logs the provider, model, prompt and completion tokens, and latency.
+- **Lean prompts.** Each prompt includes only the tables a question mentions, plus their foreign-key neighbours. Over 100 test questions this measured a 3.2% saving in prompt tokens. The saving is modest because the demo schema is small; it grows with larger schemas.
+
+## What it can answer
+
+| Capability | Example |
+|---|---|
+| Filters, including case-insensitive text | *Show cancelled orders.* |
+| Relative dates resolved to real ranges | *How many new customers signed up last month?* |
+| Aggregates over arithmetic expressions | *What is the total revenue from completed orders?* |
+| Grouping, ranking and limits | *Which country generates the most revenue?* |
+| Conditions on aggregates (HAVING) | *Which customers have placed more than 5 orders?* |
+| Anti-joins | *Find customers who have never placed an order.* |
+| Time bucketing | *Show monthly revenue from orders.* |
+| Nested aggregates | *What is the average order value?* |
+| Top N within each group | *What were the top 5 products by revenue in each category?* |
+| Period-over-period comparison | *Show customers whose spending increased this quarter.* |
+| Confirmed inserts and updates (opt-in) | *Change the price of Laptop 1 to 999* |
+
+## The web app
+
+The frontend, in `frontend/`, has two parts.
+
+- **The public site** is a scroll-driven experience. A WebGL starfield sits behind pinned, scroll-scrubbed scenes that walk through the pipeline: the question, the schema it maps onto, the ambiguity it catches, the SQL it generates and the answer it returns. The site also has a live console wired to the real API. Every SQL snippet, clarification and number on these pages is a real capture from the generator and the demo database. Visitors who prefer reduced motion, or whose browsers lack WebGL, get static and fully readable versions.
+- **The app** (`/app`) is where you work: ask questions, answer clarifications, inspect the SQL, and switch between table and chart views. It also keeps a query history and saved queries, both of which reopen stored results without re-running them, plus a live schema browser and settings. Motion there stays out of the way: results appear as soon as the backend answers.
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| API | Python 3.10+, FastAPI, Pydantic 2 |
+| Database | PostgreSQL, psycopg 3 |
+| Language models | Google Gemini and Groq through the OpenAI-compatible SDK, with failover |
+| Frontend | React 18, Vite, Tailwind CSS, Framer Motion, three.js / React Three Fiber, Lenis, Recharts |
+| Hosting | Render (API and database), Vercel (frontend) |
+| Testing | pytest, Node's built-in test runner, an evaluation harness against the live API |
+
+## Getting started
+
+**Prerequisites:**
+- Python 3.10+
+- PostgreSQL
+- Node.js 20.19+ or 22.12+
+- An API key for Gemini ([Google AI Studio](https://aistudio.google.com/apikey)), Groq ([console](https://console.groq.com/keys)), or both
+
+```bash
+git clone https://github.com/RaghavGera/Text-to-SQL.git
+cd Text-to-SQL
+
+# Backend
+pip install -r requirements.txt
+cp .env.example .env                 # set DB_* and GEMINI_API_KEY and/or GROQ_API_KEY
+createdb text_to_sql
+psql -d text_to_sql -f database/text_to_sql_database.sql   # demo data
+uvicorn app.main:app --reload        # http://127.0.0.1:8000
+
+# Frontend (second terminal)
+cd frontend
+# create frontend/.env.local containing: VITE_API_BASE_URL=http://127.0.0.1:8000
+npm install
+npm run dev                          # http://localhost:5173
+```
+
+The demo database holds 500 customers, 100 products, 2,000 orders and 5,000 order items across 5 countries. [SETUP.md](SETUP.md) covers every environment variable, the provider chain, write confirmation and troubleshooting.
+
+## Quality
+
+Claims about accuracy are measured, not estimated.
+
+```bash
+pytest testing/                          # backend: 294 passing (DB tests skip without PostgreSQL)
+cd frontend && npm test                  # frontend: 21 passing
+python -m testing.eval_harness           # 41 real questions against the live API
+python -m testing.eval_harness --offline # same questions in-process, no database needed
+```
+
+The evaluation harness checks each answer, not just the status code:
+- required SQL fragments;
+- row counts and expected values;
+- that vague questions produce a clarification rather than a guess;
+- that unsafe requests are refused.
+
+Rate limits and outages are reported separately from real failures. On the most recent live run (2026-10-05), all 41 questions passed.
+
+Tests that spend LLM tokens are opt-in: `python -m testing.run_tests --live`.
+
+## Project structure
+
+```
+app/                  FastAPI backend
+  main.py             endpoints: /query, /query/confirm, /schema, /health
+  intent_extractor.py LLM intent extraction, provider failover, prompt trimming
+  openai_client.py    provider chain configuration
+  intent_converter.py intent normalization and validation
+  ambiguity_detector.py, vague_terms.py
+  sql_generator.py    parameterized SQL generation and join planning
+  schema.py           live schema introspection
+  writes.py           write previews and confirmation tokens
+frontend/             React app (public site + /app)
+  src/components/universe/   WebGL scene
+  src/components/landing/    scroll-driven chapters
+  src/motion/                motion primitives (pinned chapters, smooth scroll, text effects)
+testing/              pytest suites, evaluation harness and its question set
+database/             demo schema and seed data
+docs/                 known issues and phase documentation
+```
+
+## API at a glance
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /query` | Ask a question; returns SQL, parameters and rows, or clarification questions |
+| `POST /query/confirm` | Execute a previewed insert or update with its confirmation token |
+| `GET /schema` | The live schema: tables, columns, keys and the database name |
+| `GET /health` | Database connectivity, and whether writes are enabled |
+
+`POST /query` accepts the following options:
+- `clarification_context`: your answer to a clarification question;
+- `strict`: set it to `false` to let the model guess instead of asking;
+- `allow_writes`: set it to `false` to keep a request read-only.
+
+Full details are in [SETUP.md](SETUP.md#request-options-for-post-query).
+
+## Documentation
+
+- [SETUP.md](SETUP.md): installation, configuration, provider chain, tests
+- [CHANGELOG.md](CHANGELOG.md): what changed and why
+- [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md): open issues, with measured evidence
+- [docs/PHASE3_README.md](docs/PHASE3_README.md): the ambiguity detector in depth
+- [docs/PHASE4_README.md](docs/PHASE4_README.md): SQL generation and the safety model
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to contribute
+
+## Roadmap
+
+**Shipped:**
+- schema introspection;
+- LLM intent extraction with provider failover;
+- the ambiguity gate and clarification loop;
+- parameterized SQL generation, including comparisons, top-N per group, nested aggregates, anti-joins and time bucketing;
+- confirmed writes;
+- the web app.
+
+**Next:** product hardening.
+- read-only transactions, query timeouts and row caps at the database layer;
+- per-client rate limiting and API keys;
+- a query audit log with usage analytics;
+- plain-English explanations of generated SQL;
+- CSV export;
+- continuous integration with a nightly live evaluation.
+
+## Contributing
+
+Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) first. Every change needs tests and a CHANGELOG entry, and any claim about accuracy needs a measurement behind it.
+
+## License
+
+Released under the [MIT License](LICENSE).
+
+## Author
+
+[Raghav Gera](https://github.com/RaghavGera)
+
+Built with Google Gemini, Groq, FastAPI, PostgreSQL and React.
