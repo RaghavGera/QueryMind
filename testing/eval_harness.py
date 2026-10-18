@@ -36,6 +36,7 @@ Only measured results are ever reported; nothing here is hard-coded.
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -206,12 +207,13 @@ class RunResult:
 def post_query(base_url: str, question: str, timeout: float = 90.0, retries: int = 3):
     """POST /query, retrying throttling/cold-start responses. Returns (http_status, body)."""
     payload = json.dumps({"question": question}).encode("utf-8")
-    request = urllib.request.Request(
-        f"{base_url.rstrip('/')}/query",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    headers = {"Content-Type": "application/json"}
+    # The API requires sign-in and daily limits; the eval runs with the
+    # server's service key instead (set QUERYMIND_SERVICE_KEY locally too).
+    service_key = os.getenv("QUERYMIND_SERVICE_KEY", "").strip()
+    if service_key:
+        headers["X-Service-Key"] = service_key
+    request = urllib.request.Request(f"{base_url.rstrip('/')}/query", data=payload, headers=headers, method="POST")
     last = (0, {"status": "error", "error": "no response"})
     for attempt in range(retries + 1):
         try:
@@ -223,6 +225,9 @@ def post_query(base_url: str, question: str, timeout: float = 90.0, retries: int
             except (ValueError, UnicodeDecodeError):
                 body = {"status": "error", "error": f"HTTP {exc.code}"}
             last = (exc.code, body)
+            if exc.code == 401 or (exc.code == 429 and body.get("quota_exceeded")):
+                body["error"] = f"{body.get('error')} (set QUERYMIND_SERVICE_KEY to run the eval)"
+                return exc.code, body  # a sign-in/limit refusal: retrying won't help
             if exc.code not in (429, 502, 503, 504) or attempt == retries:
                 return last
             wait = float(body.get("retry_after") or 2 ** (attempt + 1))

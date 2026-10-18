@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Accounts: Sign in with Google.** `POST /auth/google` takes a Google access token (checked
+  with Google: issued to this app's client id, same account, verified email) or an ID token
+  (signature against Google's keys, audience, issuer, expiry, `email_verified`) and returns a
+  7-day session token; `GET /auth/me`, `POST /auth/logout` (revokes the session row), `GET /auth/usage`.
+  Users, sessions and daily counts live in a new `querymind_meta` schema that the AI never sees.
+  New dependencies: PyJWT, cryptography. New env vars: `GOOGLE_CLIENT_ID`, `SESSION_SECRET`.
+- **Daily question limits.** `POST /query` and `/query/confirm` count against 20 questions per
+  user per UTC day (`DAILY_QUESTION_LIMIT`) and 3 for signed-out visitors
+  (`ANON_DAILY_QUESTION_LIMIT`, keyed by a hashed IP, never the raw IP). The count is atomic, is
+  refunded on server errors, and is reported in `X-Usage-*` headers; over the limit returns 429.
+  `/query/confirm` needs sign-in. `QUERYMIND_SERVICE_KEY` (header `X-Service-Key`) skips the
+  limits; the eval harness sends it and stops with a hint on 401/429 without it.
+- **A question and its clarification count once.** A counted question that needs clarifying
+  returns a single-use `clarification_ticket` (15 minutes, tied to the caller, stored hashed);
+  the answer sent with `X-Clarification-Ticket` is free, even after the last free question.
+  Free answers get no new ticket, so tickets can't be chained.
+- Frontend: `/signin` page with a "Continue with Google" button in the site's style (Google's
+  token popup), an account menu with today's count and sign-out, and a `/privacy` page.
+  Signed-out visitors can use `/app` and the landing console with "N free questions left
+  today", then get a sign-in prompt; the app's top bar and the navbar show "Sign in".
+- `frontend/vercel.json`: Content-Security-Policy (scripts only from this site and Google's
+  sign-in), `Referrer-Policy`, `X-Content-Type-Options`, `Permissions-Policy`.
 - `scripts/migrate_db.py`: copy the database to another PostgreSQL server (check / copy / verify).
   The copy runs in one transaction, refuses to overwrite a non-empty target, and `verify` compares
   per-table row counts and a revenue checksum. Credentials come from a git-ignored `.env.migrate`

@@ -31,6 +31,8 @@ const ENDPOINTS = [
   { method: "POST", path: "/query/confirm", detail: "Run a previewed insert/update with its single-use confirmation token (only when writes are enabled on the server)." },
   { method: "GET", path: "/schema", detail: "The live schema: tables, columns, primary and foreign keys, and the database name." },
   { method: "GET", path: "/health", detail: "Database connectivity, and whether writes are enabled on this server." },
+  { method: "POST", path: "/auth/google", detail: "Exchange a Google access token (or ID token) for a 7-day session token, sent as Authorization: Bearer on later requests." },
+  { method: "GET", path: "/auth/usage", detail: "Today's question count and limit for whoever is calling, signed in or not." },
 ];
 
 const OPTIONS = [
@@ -122,7 +124,11 @@ export default function Developers() {
         </div>
         <p className="mt-4 text-sm text-ink-faint">
           Base URL: <span className="font-mono text-ink-dim">{BASE_URL}</span>. Answers usually take a few seconds: each question
-          makes one call to the language model.
+          makes one call to the language model. Without a session token a caller gets 3 questions a day; a signed-in session
+          gets 20. Each /query response reports the count in <span className="font-mono text-ink-dim">X-Usage-Used</span> and{" "}
+          <span className="font-mono text-ink-dim">X-Usage-Limit</span>, and the limit returns 429. A clarification question comes with a{" "}
+          <span className="font-mono text-ink-dim">clarification_ticket</span>: send the answer with header{" "}
+          <span className="font-mono text-ink-dim">X-Clarification-Ticket</span> and it isn't counted again.
         </p>
       </section>
     </>

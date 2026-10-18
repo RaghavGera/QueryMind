@@ -6,6 +6,7 @@ import { cn } from "../../lib/utils";
 import { useLaunch } from "../../motion/warp";
 import Magnetic from "../../motion/Magnetic";
 import Logo from "../ui/Logo";
+import { useAuth } from "../../auth/AuthProvider";
 
 const links = [
   { to: "/product", label: "Product" },
@@ -17,6 +18,7 @@ export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const launch = useLaunch();
+  const signedIn = useAuth()?.status === "signedIn";
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -74,8 +76,8 @@ export default function Navbar() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Link to="/app" className="btn-ghost hidden sm:inline-flex">
-            Open app
+          <Link to={signedIn ? "/app" : "/signin?next=/app"} className="btn-ghost hidden sm:inline-flex">
+            {signedIn ? "Open app" : "Sign in"}
           </Link>
           <Magnetic className="hidden sm:inline-block">
             <button onClick={() => launch("/app")} className="btn-primary !px-5 !py-2.5">

@@ -79,6 +79,8 @@ export function useQueryPipeline({ onComplete } = {}) {
           question: questions[0] || response?.clarification?.question || "Please clarify your request.",
           questions,
           options: response?.clarification?.options || [],
+          // Answering with this ticket doesn't count as another question.
+          ticket: response?.clarification_ticket || null,
         });
         setStatus("clarifying");
         return;
@@ -188,7 +190,7 @@ export function useQueryPipeline({ onComplete } = {}) {
 
       try {
         // The original question plus the user's answer, through the same endpoint.
-        const [response, elapsedMs] = await timed(submitQuestion(question, cleanAnswer));
+        const [response, elapsedMs] = await timed(submitQuestion(question, cleanAnswer, clarification?.ticket));
         if (runToken.current.token !== token) return;
         handleResponse(response, elapsedMs, question, cleanAnswer);
       } catch (e) {
@@ -197,7 +199,7 @@ export function useQueryPipeline({ onComplete } = {}) {
         setStatus("error");
       }
     },
-    [question, handleResponse],
+    [question, clarification, handleResponse],
   );
 
   const confirm = useCallback(async () => {

@@ -2,6 +2,9 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useQueryPipeline } from "../hooks/useQueryPipeline";
+import { useAuth, useUsage } from "../auth/AuthProvider";
+import { OutOfQuestions, TriesLeft } from "../auth/UsageNotice";
+import { usageGate } from "../services/session.js";
 import { addHistoryEntry, getHistoryEntry } from "../services/historyApi";
 import { deleteSaved, getSaved, getSavedEntry, saveQuery } from "../services/savedApi";
 import { makeSnapshot, newId, sameQuery } from "../services/storedQueries";
@@ -53,6 +56,10 @@ export default function Dashboard() {
     reset,
     restore,
   } = pipeline;
+
+  const signedIn = useAuth().status === "signedIn";
+  const usage = useUsage();
+  const gate = usageGate(usage, status, clarification);
 
   const [searchParams, setSearchParams] = useSearchParams();
   // A question put in the input by "Re-run"; the user still submits it.
@@ -152,8 +159,9 @@ export default function Dashboard() {
                 {notice}
               </p>
             )}
-            <QueryInput key={draft} initialValue={draft} autoFocus={Boolean(draft)} onSubmit={submit} />
-            <SuggestionChips items={suggestedQuestions} onPick={submit} />
+            <QueryInput key={draft} initialValue={draft} autoFocus={Boolean(draft)} onSubmit={submit} disabled={gate.outOfQuestions} />
+            {!signedIn && <TriesLeft usage={usage} signedIn={false} />}
+            {gate.outOfQuestions ? <OutOfQuestions signedIn={signedIn} /> : <SuggestionChips items={suggestedQuestions} onPick={submit} />}
           </div>
         </motion.div>
       ) : (
@@ -192,7 +200,9 @@ export default function Dashboard() {
             <PipelineBeam stages={pipelineStagesInitial} startedAt={startedAt} />
           )}
 
-          {status === "clarifying" && clarification && (
+          {gate.showOutPanel && <OutOfQuestions signedIn={signedIn} pendingClarification={gate.pendingClarification} />}
+
+          {gate.showClarification && (
             <ClarificationPanel
               question={clarification.question}
               questions={clarification.questions}
@@ -222,7 +232,7 @@ export default function Dashboard() {
             <PipelineBeam stages={pipelineStagesAfterClarification} startedAt={startedAt} label="Resolving" />
           )}
 
-          {status === "error" && (
+          {status === "error" && !gate.outOfQuestions && (
             <div className="surface-card flex items-center gap-3 p-5 text-sm text-state-danger">
               <AlertTriangle size={18} />
               {error}

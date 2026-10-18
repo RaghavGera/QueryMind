@@ -100,6 +100,8 @@ The frontend, in `frontend/`, has two parts.
 - **The public site** is a scroll-driven experience. A WebGL starfield sits behind pinned, scroll-scrubbed scenes that walk through the pipeline: the question, the schema it maps onto, the ambiguity it catches, the SQL it generates and the answer it returns. The site also has a live console wired to the real API. Every SQL snippet, clarification and number on these pages is a real capture from the generator and the demo database. Visitors who prefer reduced motion, or whose browsers lack WebGL, get static and fully readable versions.
 - **The app** (`/app`) is where you work: ask questions, answer clarifications, inspect the SQL, and switch between table and chart views. It also keeps a query history and saved queries, both of which reopen stored results without re-running them, plus a live schema browser and settings. Motion there stays out of the way: results appear as soon as the backend answers.
 
+Signed-out visitors get 3 free questions a day, in the app or the landing console; signing in with Google raises that to 20. A question and the answer to its clarification count once. The limits keep the AI quota from being drained anonymously.
+
 ## Tech stack
 
 | Layer | Technology |
@@ -125,14 +127,17 @@ cd Text-to-SQL
 
 # Backend
 pip install -r requirements.txt
-cp .env.example .env                 # set DB_* and GEMINI_API_KEY and/or GROQ_API_KEY
+cp .env.example .env                 # set DB_*, GEMINI_API_KEY and/or GROQ_API_KEY,
+                                     # GOOGLE_CLIENT_ID and SESSION_SECRET (see SETUP.md)
 createdb text_to_sql
 psql -d text_to_sql -f database/text_to_sql_database.sql   # demo data
 uvicorn app.main:app --reload        # http://127.0.0.1:8000
 
 # Frontend (second terminal)
 cd frontend
-# create frontend/.env.local containing: VITE_API_BASE_URL=http://127.0.0.1:8000
+# create frontend/.env.local containing:
+#   VITE_API_BASE_URL=http://127.0.0.1:8000
+#   VITE_GOOGLE_CLIENT_ID=<the same client ID as GOOGLE_CLIENT_ID>
 npm install
 npm run dev                          # http://localhost:5173
 ```
@@ -144,9 +149,9 @@ The demo database holds 500 customers, 100 products, 2,000 orders and 5,000 orde
 Claims about accuracy are measured, not estimated.
 
 ```bash
-pytest testing/                          # backend: 294 passing (DB tests skip without PostgreSQL)
-cd frontend && npm test                  # frontend: 21 passing
-python -m testing.eval_harness           # 41 real questions against the live API
+pytest testing/                          # backend: 340 passing (DB tests skip without PostgreSQL)
+cd frontend && npm test                  # frontend: 29 passing
+python -m testing.eval_harness           # 41 real questions against the live API (needs QUERYMIND_SERVICE_KEY)
 python -m testing.eval_harness --offline # same questions in-process, no database needed
 ```
 
@@ -189,6 +194,10 @@ docs/                 known issues and phase documentation
 | `POST /query/confirm` | Execute a previewed insert or update with its confirmation token |
 | `GET /schema` | The live schema: tables, columns, keys and the database name |
 | `GET /health` | Database connectivity, and whether writes are enabled |
+| `POST /auth/google` | Exchange a Google access token (or ID token) for a session token |
+| `GET /auth/me`, `GET /auth/usage`, `POST /auth/logout` | The signed-in user, today's question count, sign-out |
+
+`POST /query` and `/query/confirm` need `Authorization: Bearer <session token>`. Without one, a caller gets the anonymous daily allowance, and `/query/confirm` is refused.
 
 `POST /query` accepts the following options:
 - `clarification_context`: your answer to a clarification question;
@@ -214,11 +223,13 @@ Full details are in [SETUP.md](SETUP.md#request-options-for-post-query).
 - the ambiguity gate and clarification loop;
 - parameterized SQL generation, including comparisons, top-N per group, nested aggregates, anti-joins and time bucketing;
 - confirmed writes;
-- the web app.
+- the web app;
+- Google sign-in with daily question limits.
 
 **Next:** product hardening.
 - read-only transactions, query timeouts and row caps at the database layer;
-- per-client rate limiting and API keys;
+- bring your own data: CSV/XLSX uploads and read-only PostgreSQL connections;
+- API keys for programmatic access;
 - a query audit log with usage analytics;
 - plain-English explanations of generated SQL;
 - CSV export;

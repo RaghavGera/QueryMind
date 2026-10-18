@@ -281,8 +281,17 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | `BACKEND_CORS_ORIGIN_REGEX` | no | Origins matched by pattern as well. Default allows this project's Vercel deployment URLs (`https://query-mind-….vercel.app`) and `http://localhost:<port>` / `http://127.0.0.1:<port>`. Set to an empty string to disable. |
 | `QUERYMIND_ENABLE_WRITES` | no | `true` allows confirmed natural-language INSERT/UPDATE. **Off by default** - leave it off on a public demo database. |
 | `QUERYMIND_CONFIRM_SECRET` | with writes | Long random string; keeps confirmation tokens valid across restarts/instances. |
+| `GOOGLE_CLIENT_ID` | for sign-in | The OAuth **Web application** client ID from Google Cloud (`….apps.googleusercontent.com`). Not a secret. Without it (or `SESSION_SECRET`) `POST /auth/google` returns 503 and nobody can sign in. |
+| `SESSION_SECRET` | for sign-in | Long random string (`python -c "import secrets; print(secrets.token_urlsafe(48))"`). Signs session tokens and keys the anonymous-visitor hash. Changing it signs everyone out and resets anonymous counts. |
+| `DAILY_QUESTION_LIMIT` | no | Questions per signed-in user per UTC day. Default `20`. |
+| `ANON_DAILY_QUESTION_LIMIT` | no | Free questions per day for signed-out visitors (app and landing console together). Default `3`. |
+| `TRUSTED_PROXY_HOPS` | no | How many proxies append to `X-Forwarded-For` in front of the app; the client IP is read that many entries from the right. Default `1` (Render). Use `0` to ignore the header. |
+| `QUERYMIND_SERVICE_KEY` | no | Long random string. A request with header `X-Service-Key: <value>` skips the daily limits; the eval harness sends it. Leave unset to disable. |
 
-Frontend (Vercel project settings): `VITE_API_BASE_URL` = the backend URL.
+Frontend (Vercel project settings): `VITE_API_BASE_URL` = the backend URL, and
+`VITE_GOOGLE_CLIENT_ID` = the same client ID as `GOOGLE_CLIENT_ID` (a public
+value, so Vercel's "config" visibility, not "secret"). Locally both go in
+`frontend/.env.local`.
 The Vercel project's **Root Directory must be `frontend/`** so `frontend/vercel.json`
 (the SPA rewrite for `/app`, `/architecture`, `/developers`) takes effect.
 
@@ -413,6 +422,56 @@ python -m testing.eval_harness --only q2-top-10-products --runs 5   # measure va
 Questions and expectations live in `testing/eval_questions.json`. Exit code is
 non-zero if any `core` question fails; `known_gap` questions are reported only.
 Throttling/outages are reported as INFRA, not as pipeline failures.
+
+The eval asks 41 questions, more than any daily limit, so set
+`QUERYMIND_SERVICE_KEY` in your shell to the value configured on the backend
+first. Without it the harness stops at the first 401/429 and says so.
+
+## Accounts and daily limits
+
+Signed-out visitors can ask a few questions a day; signing in raises the limit.
+Sign-in flow:
+
+1. The site's "Continue with Google" button opens Google's popup (Google
+   Identity Services token client, scopes `openid email profile`).
+2. Google returns an access token; the frontend sends it to
+   `POST /auth/google {"access_token": "..."}`.
+3. The backend asks Google's `tokeninfo` endpoint who the token was issued to
+   (it must be `GOOGLE_CLIENT_ID`, or a token another app obtained could sign
+   someone in), then reads `userinfo` (same account, verified email). It stores
+   the user in `querymind_meta.users` and returns `{token, expires_at, user, usage}`.
+   A Google ID token is accepted too (`{"credential": "..."}`), verified against
+   Google's published keys: signature, audience, issuer, expiry, `email_verified`.
+4. The frontend sends `Authorization: Bearer <token>` on every request. Tokens
+   last 7 days and are backed by a row in `querymind_meta.sessions`, so
+   `POST /auth/logout` revokes them at once.
+
+`POST /query` and `POST /query/confirm` count against a per-UTC-day quota:
+`DAILY_QUESTION_LIMIT` for signed-in users, `ANON_DAILY_QUESTION_LIMIT` for
+signed-out visitors (by a keyed hash of their IP; raw IPs are never stored).
+`/query/confirm` needs sign-in. The count is taken atomically before the
+pipeline runs and refunded if the request fails on our side (5xx). Every counted
+response carries `X-Usage-Scope`, `X-Usage-Used` and `X-Usage-Limit`; over the
+limit the API returns **429** with `{"error", "usage", "quota_exceeded": true}`.
+`GET /auth/usage` returns today's count for whoever is calling.
+
+**A question and its clarification count once.** When a counted question comes
+back with a clarification question, the response carries a `clarification_ticket`
+(single use, 15 minutes, tied to the caller, stored only as a hash). Send the
+answer with header `X-Clarification-Ticket: <ticket>` and it isn't counted, even
+after the last free question. A free answer never gets a new ticket, so one
+counted question costs at most two model calls. Without the header, or with a
+used or expired ticket, the answer is counted like any question.
+
+The `querymind_meta` tables are created at startup. The schema reader only reads
+`public`, so the AI never sees them.
+
+**Google Cloud setup:** OAuth consent screen (app name, support email, the
+`/privacy` page URL), then a **Web application** OAuth client whose *Authorized
+JavaScript origins* list every frontend origin (the Vercel URL,
+`http://localhost:5173`). No redirect URIs are needed. While the consent screen
+is in *Testing*, only the listed test users can sign in; publish it to open
+sign-in to every Google account.
 
 ## Natural-language writes (INSERT / UPDATE)
 

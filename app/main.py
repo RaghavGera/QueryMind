@@ -12,14 +12,31 @@ parameters) for the caller to run, along with whatever clarification is
 needed if the pipeline couldn't safely produce a query.
 """
 
-from fastapi import Depends, FastAPI
+from typing import Optional
+
+from fastapi import Depends, FastAPI, Header, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import os
 
+from app.accounts import AccountStore, next_reset
 from app.ambiguity_detector import AmbiguityDetector
+from app.auth import (
+    AuthError,
+    Principal,
+    anonymous_subject,
+    auth_configured,
+    bearer_token,
+    client_ip,
+    issue_session_token,
+    read_session_token,
+    service_key_matches,
+    verify_google_access_token,
+    verify_google_id_token,
+)
 from app import writes
 from app.database import Database, WriteConflictError, get_db, init_db
 from app.intent_converter import IntentConversionError, convert_query_intent
@@ -61,6 +78,137 @@ cors_origin_regex = os.getenv(
     r"https://query-mind(-[a-z0-9-]+)?\.vercel\.app|http://(localhost|127\.0\.0\.1):\d+",
 ) or None
 
+# --------------------------------------------------------------------------- #
+# Sign-in and daily usage limits for the endpoints that spend AI credits.
+# Added *before* CORS so CORS stays outermost and 401/429 bodies are readable
+# by the browser.
+# --------------------------------------------------------------------------- #
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.getenv(name, default)))
+    except ValueError:
+        return default
+
+
+def user_daily_limit() -> int:
+    return _int_env("DAILY_QUESTION_LIMIT", 20)
+
+
+def anonymous_daily_limit() -> int:
+    return _int_env("ANON_DAILY_QUESTION_LIMIT", 3)
+
+
+_LIMITED_PATHS = {"/query", "/query/confirm"}
+_store: Optional[AccountStore] = None
+
+
+def get_account_store() -> AccountStore:
+    global _store
+    if _store is None:
+        _store = AccountStore(get_db())
+    return _store
+
+
+def resolve_principal(request: Request, store: AccountStore) -> Principal:
+    """Service key > valid session > anonymous visitor. Raises AuthError for bad tokens."""
+    if service_key_matches(request.headers.get("x-service-key")):
+        return Principal(kind="service", subject="service")
+    token = bearer_token(request.headers.get("authorization"))
+    if token:
+        session_id = read_session_token(token)
+        user = store.session_user(session_id)
+        if user is None:
+            raise AuthError("Your session has ended. Please sign in again.")
+        return Principal(kind="user", subject=f"user:{user.id}", user=user, session_id=session_id)
+    ip = client_ip(
+        request.headers.get("x-forwarded-for"),
+        request.client.host if request.client else None,
+        _int_env("TRUSTED_PROXY_HOPS", 1),
+    )
+    return Principal(kind="anonymous", subject=anonymous_subject(ip))
+
+
+def _usage_payload(principal: Principal, used: int, limit: Optional[int]) -> dict:
+    return {
+        "scope": principal.kind,
+        "used": used,
+        "limit": limit,
+        "resets_at": next_reset().isoformat(),
+    }
+
+
+def _usage_headers(usage: dict) -> dict:
+    headers = {"X-Usage-Scope": usage["scope"], "X-Usage-Used": str(usage["used"])}
+    if usage["limit"] is not None:
+        headers["X-Usage-Limit"] = str(usage["limit"])
+    return headers
+
+
+@app.middleware("http")
+async def usage_limits(request: Request, call_next):
+    if request.method != "POST" or request.url.path not in _LIMITED_PATHS:
+        return await call_next(request)
+
+    try:
+        store = get_account_store()
+        principal = await run_in_threadpool(resolve_principal, request, store)
+    except AuthError as exc:
+        return JSONResponse(
+            status_code=exc.status,
+            content={"status": "error", "error": str(exc), "sign_in_required": exc.status == 401},
+        )
+    except Exception:
+        logger.exception("Could not check sign-in")
+        return JSONResponse(status_code=503, content={"status": "error", "error": "Sign-in check failed. Please retry."})
+
+    if request.url.path == "/query/confirm" and principal.kind == "anonymous":
+        return JSONResponse(
+            status_code=401,
+            content={"status": "error", "error": "Sign in to make changes.", "sign_in_required": True},
+        )
+
+    if principal.kind == "service" or request.url.path != "/query":
+        return await call_next(request)
+
+    limit = user_daily_limit() if principal.kind == "user" else anonymous_daily_limit()
+    ticket = (request.headers.get("x-clarification-ticket") or "").strip()
+    if ticket and await run_in_threadpool(store.redeem_ticket, ticket, principal.subject):
+        # Answering a clarification of a question already counted: free.
+        response = await call_next(request)
+        if response.status_code >= 500 or response.status_code == 429:
+            await run_in_threadpool(store.restore_ticket, ticket)
+        used = await run_in_threadpool(store.used_today, principal.subject)
+        for key, value in _usage_headers(_usage_payload(principal, used, limit)).items():
+            response.headers[key] = value
+        return response
+
+    used = await run_in_threadpool(store.try_consume, principal.subject, limit)
+    if used is None:
+        usage = _usage_payload(principal, limit, limit)
+        message = (
+            f"You've used today's {limit} questions. They reset at 00:00 UTC."
+            if principal.kind == "user"
+            else f"That's all {limit} free questions for today. Sign in with Google to keep going."
+        )
+        return JSONResponse(
+            status_code=429,
+            content={"status": "error", "error": message, "usage": usage,
+                     "sign_in_required": principal.kind == "anonymous", "quota_exceeded": True},
+            headers=_usage_headers(usage),
+        )
+
+    request.state.charged_subject = principal.subject  # lets /query issue a clarification ticket
+    response = await call_next(request)
+    if response.status_code >= 500 or response.status_code == 429:
+        # The model or server failed, not the user: give the question back.
+        await run_in_threadpool(store.refund, principal.subject)
+        used -= 1
+    for key, value in _usage_headers(_usage_payload(principal, used, limit)).items():
+        response.headers[key] = value
+    return response
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -68,6 +216,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Usage-Scope", "X-Usage-Used", "X-Usage-Limit", "Retry-After"],
 )
 
 
@@ -78,6 +227,104 @@ async def startup_event():
     db_instance = init_db()
     print("✓ Database initialized")
     print(f"✓ Connected to {db_instance.config.database} on {db_instance.config.host}")
+    try:
+        AccountStore(db_instance).ensure_schema()
+    except Exception:
+        # Without these tables sign-in fails loudly per request; the demo still runs.
+        logger.exception("Could not create the account tables (querymind_meta)")
+    if not auth_configured():
+        logger.warning("Sign-in is not configured: set GOOGLE_CLIENT_ID and SESSION_SECRET.")
+
+
+# --------------------------------------------------------------------------- #
+# Account endpoints
+# --------------------------------------------------------------------------- #
+
+class GoogleSignIn(BaseModel):
+    access_token: Optional[str] = None  # from the site's button (Google's token popup)
+    credential: Optional[str] = None    # a Google ID token
+
+
+def _auth_error(exc: AuthError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status, content={"status": "error", "error": str(exc)})
+
+
+def _session_principal(authorization: Optional[str]) -> Principal:
+    token = bearer_token(authorization)
+    if not token:
+        raise AuthError("Not signed in.")
+    session_id = read_session_token(token)
+    user = get_account_store().session_user(session_id)
+    if user is None:
+        raise AuthError("Your session has ended. Please sign in again.")
+    return Principal(kind="user", subject=f"user:{user.id}", user=user, session_id=session_id)
+
+
+@app.post("/auth/google")
+def sign_in_with_google(body: GoogleSignIn):
+    """Exchange a Google ID token for a QueryMind session."""
+    try:
+        if not auth_configured():  # before any DB write, so a half-set server leaves no rows
+            raise AuthError("Sign-in is not configured on this server.", status=503)
+        if body.access_token:
+            claims = verify_google_access_token(body.access_token)
+        elif body.credential:
+            claims = verify_google_id_token(body.credential)
+        else:
+            raise AuthError("Send a Google access_token or credential.", status=400)
+        store = get_account_store()
+        user = store.upsert_google_user(claims["sub"], claims["email"], claims.get("name"), claims.get("picture"))
+        session_id, expires_at = store.create_session(user.id)
+        token = issue_session_token(session_id, user.id, expires_at)
+    except AuthError as exc:
+        return _auth_error(exc)
+    limit = user_daily_limit()
+    used = store.used_today(f"user:{user.id}")
+    return {
+        "token": token,
+        "expires_at": expires_at.isoformat(),
+        "user": user.to_dict(),
+        "usage": {"scope": "user", "used": used, "limit": limit, "resets_at": next_reset().isoformat()},
+    }
+
+
+@app.get("/auth/me")
+def who_am_i(authorization: Optional[str] = Header(default=None)):
+    try:
+        principal = _session_principal(authorization)
+    except AuthError as exc:
+        return _auth_error(exc)
+    used = get_account_store().used_today(principal.subject)
+    return {
+        "user": principal.user.to_dict(),
+        "usage": {"scope": "user", "used": used, "limit": user_daily_limit(), "resets_at": next_reset().isoformat()},
+    }
+
+
+@app.get("/auth/usage")
+def anonymous_usage(request: Request):
+    """Today's usage for whoever is calling (the landing console shows tries left)."""
+    store = get_account_store()
+    try:
+        principal = resolve_principal(request, store)
+    except AuthError as exc:
+        return _auth_error(exc)
+    if principal.kind == "service":
+        return {"usage": {"scope": "service", "used": 0, "limit": None, "resets_at": next_reset().isoformat()}}
+    limit = user_daily_limit() if principal.kind == "user" else anonymous_daily_limit()
+    usage = _usage_payload(principal, store.used_today(principal.subject), limit)
+    usage["user_limit"] = user_daily_limit()  # what signing in would give
+    return {"usage": usage}
+
+
+@app.post("/auth/logout")
+def sign_out(authorization: Optional[str] = Header(default=None)):
+    try:
+        principal = _session_principal(authorization)
+    except AuthError:
+        return {"status": "signed_out"}  # already signed out: nothing to do
+    get_account_store().revoke_session(principal.session_id)
+    return {"status": "signed_out"}
 
 
 def _schema_context(schema: DatabaseSchema) -> dict:
@@ -145,7 +392,8 @@ _EXTRACTION_ERROR_STATUS = {
 @app.post("/query")
 async def run_query(
     request: QueryRequest,
-    db: Database = Depends(get_db)
+    db: Database = Depends(get_db),
+    http_request: Request = None,
 ):
     question = request.question.strip()
 
@@ -163,7 +411,7 @@ async def run_query(
         )
 
     try:
-        return _run_pipeline(question, request, db)
+        result = _run_pipeline(question, request, db)
     except Exception as exc:  # Last-resort guard: never leak a traceback.
         logger.exception("Unhandled error while answering %r", question)
         return _error_response(
@@ -171,6 +419,16 @@ async def run_query(
             "Something went wrong while processing the question.",
             details=type(exc).__name__,
         )
+
+    # A clarification question costs nothing extra: the answer, sent with this
+    # ticket, is free. Only counted questions get one, so tickets don't chain.
+    subject = getattr(getattr(http_request, "state", None), "charged_subject", None)
+    if subject and isinstance(result, dict) and result.get("clarification_questions"):
+        try:
+            result["clarification_ticket"] = get_account_store().issue_ticket(subject)
+        except Exception:
+            logger.exception("Could not issue a clarification ticket")
+    return result
 
 
 def _run_pipeline(question: str, request: QueryRequest, db: Database):

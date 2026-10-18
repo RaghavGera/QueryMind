@@ -6,6 +6,7 @@ const links = [
   { to: "/architecture", label: "How it works" },
   { to: "/developers", label: "Developers" },
   { to: "/app", label: "Open app" },
+  { to: "/privacy", label: "Privacy" },
 ];
 
 export default function Footer() {

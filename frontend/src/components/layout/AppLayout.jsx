@@ -1,10 +1,13 @@
-import { Suspense, useState } from "react";
-import { useLocation, useOutlet } from "react-router-dom";
+import { Suspense, useEffect, useState } from "react";
+import { Link, useLocation, useOutlet } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Menu, RotateCw } from "lucide-react";
 import Sidebar, { ConnectionBadge } from "../navigation/Sidebar";
 import BootScreen from "../ui/BootScreen";
 import { useBackendInfo } from "../../hooks/useBackendInfo";
+import { useAuth } from "../../auth/AuthProvider";
+import { fetchUsage } from "../../services/queryApi";
+import AccountMenu from "../navigation/AccountMenu";
 
 /**
  * The app shell. Same look as the site, but motion stays quick (≤ 200 ms
@@ -16,6 +19,14 @@ export default function AppLayout() {
   const backend = useBackendInfo();
   const location = useLocation();
   const outlet = useOutlet();
+  const { status } = useAuth();
+
+  // Signed-out visitors get a few free questions a day; show how many are left.
+  useEffect(() => {
+    if (status === "signedOut") fetchUsage().catch(() => {});
+  }, [status]);
+
+  if (status === "checking") return <BootScreen />;
 
   return (
     <div className="relative flex h-svh overflow-hidden bg-base-950">
@@ -31,7 +42,7 @@ export default function AppLayout() {
       />
 
       <div className="relative flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-white/[0.06] bg-base-950/40 px-4 backdrop-blur-xl sm:px-6">
+        <header className="relative z-30 flex h-16 shrink-0 items-center justify-between border-b border-white/[0.06] bg-base-950/40 px-4 backdrop-blur-xl sm:px-6">
           <button onClick={() => setMobileOpen(true)} className="btn-ghost !px-1.5 md:hidden" aria-label="Open menu">
             <Menu size={18} />
           </button>
@@ -41,6 +52,14 @@ export default function AppLayout() {
           </span>
           <div className="flex items-center gap-3 text-ink-dim">
             <ConnectionBadge backend={backend} showDatabase={false} />
+            {status === "signedIn" ? (
+              <AccountMenu />
+            ) : (
+              // Come back to the same page, query string included, after signing in.
+              <Link to={`/signin?next=${encodeURIComponent(location.pathname + location.search)}`} className="btn-secondary !px-4 !py-1.5">
+                Sign in
+              </Link>
+            )}
             {backend.status === "unreachable" && (
               <button onClick={backend.retry} className="btn-ghost !px-2 !py-1 text-xs" title={backend.error || undefined}>
                 <RotateCw size={13} /> Retry

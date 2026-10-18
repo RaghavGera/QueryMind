@@ -1,5 +1,10 @@
+import { useEffect } from "react";
 import { AlertTriangle, Info } from "lucide-react";
 import { useQueryPipeline } from "../../hooks/useQueryPipeline";
+import { useAuth, useUsage } from "../../auth/AuthProvider";
+import { OutOfQuestions, TriesLeft } from "../../auth/UsageNotice";
+import { fetchUsage } from "../../services/queryApi";
+import { usageGate } from "../../services/session.js";
 import QueryInput from "../query/QueryInput";
 import SuggestionChips from "../query/SuggestionChips";
 import PipelineBeam from "../query/PipelineBeam";
@@ -10,18 +15,30 @@ import { pipelineStagesInitial, pipelineStagesAfterClarification, suggestedQuest
 
 /** The landing page's live console: the real pipeline against the real API. */
 export default function InteractiveDemo() {
+  const { status: authStatus } = useAuth();
+  const usage = useUsage();
   const { status, startedAt, clarification, selectedChoice, sql, params, result, executionMs, warnings, error, ask, selectClarification, reset } =
     useQueryPipeline();
   const busy = status === "processing" || status === "generating";
+  const signedIn = authStatus === "signedIn";
+  const gate = usageGate(usage, status, clarification);
+  const outOfTries = gate.outOfQuestions;
+
+  useEffect(() => {
+    fetchUsage().catch(() => {}); // shows "3 free questions left" before the first try
+  }, [signedIn]);
 
   return (
     <div className="space-y-4">
-      <QueryInput onSubmit={ask} disabled={busy} initialValue="Show me the top customers." />
-      {status === "idle" && <SuggestionChips items={suggestedQuestions} onPick={ask} />}
+      <QueryInput onSubmit={ask} disabled={busy || outOfTries} initialValue="Show me the top customers." />
+      <TriesLeft usage={usage} signedIn={signedIn} />
+      {status === "idle" && !outOfTries && <SuggestionChips items={suggestedQuestions} onPick={ask} />}
+
+      {gate.showOutPanel && <OutOfQuestions signedIn={signedIn} pendingClarification={gate.pendingClarification} />}
 
       {status === "processing" && <PipelineBeam stages={pipelineStagesInitial} startedAt={startedAt} />}
 
-      {status === "clarifying" && clarification && (
+      {gate.showClarification && (
         <ClarificationPanel
           question={clarification.question}
           questions={clarification.questions}
@@ -32,7 +49,7 @@ export default function InteractiveDemo() {
 
       {status === "generating" && <PipelineBeam stages={pipelineStagesAfterClarification} startedAt={startedAt} />}
 
-      {status === "error" && (
+      {status === "error" && !outOfTries && (
         <div className="flex items-start gap-3 rounded-xl border border-state-danger/30 bg-state-danger/10 p-4 text-sm text-state-danger">
           <AlertTriangle size={18} className="mt-0.5 shrink-0" />
           {error}
