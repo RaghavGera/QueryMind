@@ -121,12 +121,17 @@ def resolve_principal(request: Request, store: AccountStore) -> Principal:
         if user is None:
             raise AuthError("Your session has ended. Please sign in again.")
         return Principal(kind="user", subject=f"user:{user.id}", user=user, session_id=session_id)
-    ip = client_ip(
+    return Principal(kind="anonymous", subject=anonymous_subject(_request_ip(request)))
+
+
+def _request_ip(request: Request) -> str:
+    header = (os.getenv("CLIENT_IP_HEADER") or "").strip()
+    return client_ip(
         request.headers.get("x-forwarded-for"),
         request.client.host if request.client else None,
         _int_env("TRUSTED_PROXY_HOPS", 1),
+        request.headers.get(header) if header else None,
     )
-    return Principal(kind="anonymous", subject=anonymous_subject(ip))
 
 
 def _usage_payload(principal: Principal, used: int, limit: Optional[int]) -> dict:
@@ -285,6 +290,21 @@ def sign_in_with_google(body: GoogleSignIn):
         "expires_at": expires_at.isoformat(),
         "user": user.to_dict(),
         "usage": {"scope": "user", "used": used, "limit": limit, "resets_at": next_reset().isoformat()},
+    }
+
+
+@app.get("/debug/forwarding")
+def forwarding_headers(request: Request):
+    """
+    TEMPORARY: echoes the proxy headers of the caller's own request, to set
+    CLIENT_IP_HEADER / TRUSTED_PROXY_HOPS for the host. Nothing is stored.
+    Remove once the free-question counter is confirmed per visitor.
+    """
+    names = ("x-forwarded-for", "cf-connecting-ip", "true-client-ip", "x-real-ip", "forwarded", "x-envoy-external-address")
+    return {
+        "headers": {name: request.headers.get(name) for name in names if request.headers.get(name)},
+        "peer": request.client.host if request.client else None,
+        "counted_as": _request_ip(request),
     }
 
 

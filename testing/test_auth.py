@@ -116,6 +116,18 @@ def test_client_ip_ignores_forged_left_entries():
     assert auth.client_ip(None, "10.0.0.1") == "10.0.0.1"
 
 
+def test_a_proxy_set_client_ip_header_wins(api, monkeypatch):
+    assert auth.client_ip("6.6.6.6, 172.68.1.1", "10.0.0.1", 1, header_ip=" 203.0.113.9 ") == "203.0.113.9"
+    assert auth.client_ip("6.6.6.6, 172.68.1.1", "10.0.0.1", 1, header_ip="") == "172.68.1.1"
+    monkeypatch.setenv("CLIENT_IP_HEADER", "CF-Connecting-IP")
+    monkeypatch.setenv("ANON_DAILY_QUESTION_LIMIT", "1")
+    # Two visitors behind the same proxy hop are counted separately.
+    proxy = {"X-Forwarded-For": "172.68.1.1"}
+    assert _ask(api, {**proxy, "CF-Connecting-IP": "203.0.113.1"}).status_code == 200
+    assert _ask(api, {**proxy, "CF-Connecting-IP": "203.0.113.2"}).status_code == 200
+    assert _ask(api, {**proxy, "CF-Connecting-IP": "203.0.113.1"}).status_code == 429
+
+
 def test_anonymous_subject_never_contains_the_ip():
     subject = auth.anonymous_subject("203.0.113.9")
     assert subject.startswith("anon:") and "203.0.113.9" not in subject

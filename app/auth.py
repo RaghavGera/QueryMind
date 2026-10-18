@@ -159,12 +159,18 @@ def service_key_matches(provided: Optional[str]) -> bool:
     return bool(expected and provided) and hmac.compare_digest(expected, provided.strip())
 
 
-def client_ip(forwarded_for: Optional[str], peer: Optional[str], trusted_hops: int = 1) -> str:
+def client_ip(
+    forwarded_for: Optional[str], peer: Optional[str], trusted_hops: int = 1, header_ip: Optional[str] = None
+) -> str:
     """
-    The caller's IP. Behind Render's proxy the real client is the entry
-    ``trusted_hops`` from the right of X-Forwarded-For (entries further left
-    are client-supplied and can be forged).
+    The caller's IP. ``header_ip`` is the value of CLIENT_IP_HEADER, a header
+    the proxy in front sets itself (so a client can't forge it); it wins when
+    present. Otherwise the client is the entry ``trusted_hops`` from the right
+    of X-Forwarded-For (entries further left are client-supplied and can be
+    forged).
     """
+    if header_ip and header_ip.strip():
+        return header_ip.strip()
     parts = [p.strip() for p in (forwarded_for or "").split(",") if p.strip()]
     if parts and trusted_hops > 0:
         return parts[-min(trusted_hops, len(parts))]
