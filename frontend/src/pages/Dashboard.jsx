@@ -257,8 +257,8 @@ export default function Dashboard() {
                   ))}
                 </ul>
               )}
-              <SqlPanel sql={sql} onRerun={rerun} />
-              <ResultsView result={result} executionMs={executionMs} />
+              <SqlPanel sql={sql} params={params} onRerun={rerun} />
+              <ResultsView result={result} executionMs={executionMs} params={params} />
             </div>
           )}
         </div>

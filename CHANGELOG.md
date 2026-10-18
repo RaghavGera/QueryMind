@@ -90,6 +90,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/KNOWN_ISSUES.md`: observed behaviour per question, owner actions, open gaps.
 
 ### Changed
+- **Sales count completed orders only.** Revenue, sales, spending and "units sold" questions over
+  order line items now add `orders.status = 'Completed'` (pending and cancelled orders are not
+  sales), unless the question names a status itself. Every affected answer carries the warning
+  "Sales count completed orders only; pending and cancelled orders are excluded." Landing page,
+  README and Developers examples recaptured: India's revenue is 706,939 (734,561 with all statuses).
+- Aggregation result columns have readable names: `sum_quantity_x_unit_price` instead of
+  `sum_order_items_quantity_order_items_unit_price`; duplicates get a numeric suffix.
 - **LLM chain is now `gemini-lite,groq,gemini-lite-alt,gemini-flash`.** `gemini-lite` defaults to
   `gemini-3.5-flash-lite` (41/41 offline eval, ~1-3 s per call on 2026-10-05); the previous
   `gemini-3.1-flash-lite` moves to the new `gemini-lite-alt` entry (`GEMINI_LITE_ALT_MODEL`),
@@ -113,6 +120,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- The SQL panel showed `%s` placeholders and hid the values (e.g. the dates "last month" resolved
+  to). It now shows the bound values inline and copies runnable SQL; the server still sends them as
+  parameters. Long first lines no longer squeeze the line-number column.
+- A total over zero rows (SQL `NULL`) rendered as an empty card. It now says no rows matched and
+  lists the filter values. `NULL` table cells show as a dash; column headings are humanized.
 - The database connection string was built by string formatting, so a password containing a space
   or quote broke the connection. It is now built with psycopg's `make_conninfo`, which quotes every
   value.

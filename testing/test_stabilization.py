@@ -315,7 +315,8 @@ def test_model_supplied_aggregation_is_left_untouched(schema):
 
     assert result.status == GenerationStatus.SUCCESS, result
     assert "unit_price" in result.sql
-    assert not structured.recognized_entities.get("assumptions")
+    # the model's metric is kept (no ranking assumption); only the sales rule applies
+    assert structured.recognized_entities.get("assumptions") == ["Sales count completed orders only; pending and cancelled orders are excluded."]
 
 
 def test_non_ranking_group_by_still_asks_for_clarification(schema):

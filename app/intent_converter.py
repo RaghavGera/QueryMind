@@ -128,6 +128,26 @@ def convert_condition(raw: Dict[str, Any]) -> Condition:
     )
 
 
+_OPERATOR_WORDS = {"*": "_x_", "+": "_plus_", "-": "_minus_", "/": "_per_"}
+
+
+def readable_alias(function: str, column: Optional[str]) -> str:
+    """
+    Result column name for an aggregation, e.g.
+    SUM(order_items.quantity * order_items.unit_price) -> "sum_quantity_x_unit_price".
+    Table prefixes are dropped (the SQL keeps them) and operators become words,
+    so the name reads as a heading instead of a flattened expression.
+    """
+    if not column:
+        return f"{function.lower()}_all"
+    text = re.sub(r"\b[A-Za-z_][A-Za-z0-9_]*\.", "", column)  # orders.order_id -> order_id
+    for operator, word in _OPERATOR_WORDS.items():
+        text = text.replace(operator, word)
+    text = re.sub(r"\W+", "_", text)
+    text = re.sub(r"_+", "_", text).strip("_").lower()
+    return f"{function.lower()}_{text}"[:60] or f"{function.lower()}_value"
+
+
 def convert_aggregations(
     agg_names: List[str],
     columns: List[str]
@@ -201,13 +221,14 @@ def convert_aggregations(
                 "but none was provided."
             )
 
-        if column:
-            # Sanitize so expression columns (e.g. "order_items.quantity * order_items.unit_price")
-            # produce valid aliases. Plain columns are unaffected.
-            safe_column = re.sub(r"\W+", "_", column).strip("_")
-            alias = f"{name.lower()}_{safe_column}"
-        else:
-            alias = f"{name.lower()}_all"
+        alias = readable_alias(name, column)
+        # Without table prefixes two aggregations can share a name
+        # (SUM(orders.amount), SUM(payments.amount)); result rows are dicts,
+        # so a duplicate would silently overwrite the other value.
+        taken = {a.alias for a in aggregations}
+        base, n = alias, 2
+        while alias in taken:
+            alias, n = f"{base}_{n}", n + 1
 
         aggregations.append(
             Aggregation(
@@ -282,6 +303,52 @@ def _default_ranking_metric(
 
 # "how many customers ...", "how many orders were placed ..."
 _HOW_MANY = re.compile(r"^\s*how\s+many\b", re.IGNORECASE)
+
+# Business rule (owner decision, 2026-10-18): sales count completed orders only.
+# Pending and cancelled orders are not sales. Applies to sales-language
+# questions over order line items, unless the question names a status itself.
+SALES_STATUS_TABLE, SALES_STATUS_COLUMN, SALES_STATUS_VALUE = "orders", "status", "Completed"
+_SALES_WORDS = re.compile(
+    r"\b(sales?|sell\w*|sold|revenue|earn\w*|income|spen[dt]\w*|purchas\w*|bought|turnover)\b", re.IGNORECASE
+)
+_STATUS_WORDS = re.compile(
+    r"\b(status|complet\w*|cancel\w*|pending|all\s+orders|including|regardless)\b", re.IGNORECASE
+)
+
+
+def _apply_completed_sales_rule(
+    question: str,
+    tables: List[str],
+    conditions: List[Condition],
+    aggregations: List[Aggregation],
+    schema: Optional[DatabaseSchema],
+    assumptions: List[str],
+    ranked_by_units_sold: bool = False,
+) -> None:
+    """Restrict sales metrics to completed orders (mutates tables/conditions)."""
+    if schema is None:
+        return
+    status_table = schema.tables.get(SALES_STATUS_TABLE)
+    if status_table is None or SALES_STATUS_COLUMN not in status_table.columns:
+        return
+    over_line_items = any(
+        agg.column and re.search(r"\border_items\.(quantity|unit_price)\b", agg.column) for agg in aggregations
+    )
+    if not over_line_items or not (ranked_by_units_sold or _SALES_WORDS.search(question)):
+        return
+    if _STATUS_WORDS.search(question):
+        return  # the user said which orders they mean
+    if any(c.column.split(".")[-1] == SALES_STATUS_COLUMN for c in conditions):
+        return  # the extractor already filtered on status
+    conditions.append(Condition(
+        column=SALES_STATUS_COLUMN,
+        operator=ConditionOperator.EQUALS,
+        value=SALES_STATUS_VALUE,
+        table=SALES_STATUS_TABLE,
+    ))
+    if SALES_STATUS_TABLE not in tables:
+        tables.append(SALES_STATUS_TABLE)
+    assumptions.append("Sales count completed orders only; pending and cancelled orders are excluded.")
 
 
 def _apply_anti_join(
@@ -588,11 +655,11 @@ def convert_query_intent(
             # AVG(SUM(x)) -> inner SUM(x) grouped by the user's grouping, outer AVG.
             outer_function, inner_spec = nested.group(1), nested.group(2).strip()
             inner_function = inner_spec.split("(", 1)[0].strip()
-            inner_column = re.sub(r"\W+", "_", inner_spec.split("(", 1)[1].rsplit(")", 1)[0]).strip("_")
+            inner_column = inner_spec.split("(", 1)[1].rsplit(")", 1)[0]
             outer_aggregation = Aggregation(
                 aggregation_type=_AGGREGATION_MAP[outer_function.lower()],
                 column="agg_value",
-                alias=f"{outer_function}_{inner_function}_{inner_column}".lower(),
+                alias=readable_alias(f"{outer_function}_{inner_function}", inner_column),
             )
             agg_specs[index] = inner_spec
             columns = [c for c in columns if not _NESTED_AGGREGATION.match(str(c).strip())]
@@ -628,6 +695,7 @@ def convert_query_intent(
         order_by = [OrderBy(column=query_intent.order_by["column"], direction=direction)]
 
     assumptions: List[str] = []
+    ranked_by_units_sold = False
     limit = query_intent.limit
     if (
         schema is not None
@@ -656,6 +724,7 @@ def convert_query_intent(
                 ]
                 metric_text = f"{default_metric.aggregation_type.value}({default_metric.column})"
                 assumption = f"No ranking metric was given, so results are ranked by units sold ({metric_text})."
+                ranked_by_units_sold = True
             top_n = _TOP_N.search(original_question)
             if limit is None and top_n:
                 limit = int(top_n.group(1))
@@ -711,6 +780,9 @@ def convert_query_intent(
         order_by = []
 
     tables = _referenced_tables(list(query_intent.tables), query_intent, aggregations)
+    _apply_completed_sales_rule(
+        original_question, tables, conditions, aggregations, schema, assumptions, ranked_by_units_sold
+    )
     joins = _apply_anti_join(_derive_fk_joins(tables, schema), conditions, tables, schema)
 
     try:

@@ -2,6 +2,7 @@ import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts";
+import { humanizeColumn } from "../../lib/sqlDisplay";
 
 export default function ResultsChart({ columns, rows, kind = "bar" }) {
   const numericCols = columns.filter((c) => typeof rows[0]?.[c] === "number");
@@ -38,9 +39,9 @@ export default function ResultsChart({ columns, rows, kind = "bar" }) {
             cursor={{ fill: "rgba(255,255,255,0.04)" }}
           />
           {kind === "line" ? (
-            <Line type="monotone" dataKey={yKey} stroke="#5eead4" strokeWidth={2} dot={{ r: 3, fill: "#5eead4" }} animationDuration={800} />
+            <Line type="monotone" dataKey={yKey} name={humanizeColumn(yKey)} stroke="#5eead4" strokeWidth={2} dot={{ r: 3, fill: "#5eead4" }} animationDuration={800} />
           ) : (
-            <Bar dataKey={yKey} fill="url(#qm-bar)" radius={[6, 6, 0, 0]} animationDuration={800} />
+            <Bar dataKey={yKey} name={humanizeColumn(yKey)} fill="url(#qm-bar)" radius={[6, 6, 0, 0]} animationDuration={800} />
           )}
         </ChartComp>
       </ResponsiveContainer>

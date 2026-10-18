@@ -24,19 +24,20 @@ curl -X POST https://querymind-crln.onrender.com/query \
   -d '{"question": "Which region generated the most revenue?"}'
 ```
 
-The schema has no `region` column, so the extractor maps the word to the closest real one, `customers.country`. It reads "revenue" as arithmetic over real columns. The generator then produces:
+The schema has no `region` column, so the extractor maps the word to the closest real one, `customers.country`. It reads "revenue" as arithmetic over real columns, and revenue counts completed orders only. The generator then produces:
 
 ```sql
-SELECT "customers"."country", SUM("order_items"."quantity" * "order_items"."unit_price") AS "sum_order_items_quantity_order_items_unit_price"
+SELECT "customers"."country", SUM("order_items"."quantity" * "order_items"."unit_price") AS "sum_quantity_x_unit_price"
 FROM "orders"
 INNER JOIN "customers" ON "orders"."customer_id" = "customers"."customer_id"
 INNER JOIN "order_items" ON "orders"."order_id" = "order_items"."order_id"
+WHERE LOWER("orders"."status") = LOWER(%s)          -- %s = 'Completed'
 GROUP BY "customers"."country"
 ORDER BY SUM("order_items"."quantity" * "order_items"."unit_price") DESC
 LIMIT 1
 ```
 
-The response contains that SQL, its parameters, any warnings, and the rows: India, 734,561.
+The response contains that SQL, its parameters, the rows (India, 706,939), and a warning that states the completed-orders rule. Every assumption QueryMind makes is surfaced.
 
 Ask something vague and the response is a clarification question instead. Answer it, and QueryMind runs exactly what you meant.
 

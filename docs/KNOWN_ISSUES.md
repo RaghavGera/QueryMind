@@ -77,3 +77,10 @@ return 200 with the app shell. Items 1, 4, 5, 6 still open.
 Update 2026-10-04 (owner): item 5 confirmed — Render logs show `LLM request served provider=gemini-lite`. Item 6: `GROQ_MODEL` is not set on Render (default used). `DATABASE_URL` is set on Render but unused by the code; delete it after the password rotation.
 
 7. **The Render PostgreSQL database expires on 2026-10-23** (free plan). Before then: upgrade the plan, or migrate (`pg_dump` → restore on the new host → update the five `DB_*` vars → `/health`). A migration also replaces the leaked credentials from item 1.
+
+Update 2026-10-18: **database moved from Render to Neon** (us-west-2), with `scripts/migrate_db.py`.
+`verify` reported identical row counts in all 4 tables and a matching revenue checksum. Live
+`/health` reports the Neon host, and the live eval passed 41/41 (median 2.0 s per question).
+This closes item 7 (Render expiry, 2026-10-23) and item 1: the leaked Render password retires with
+the old database. Remaining owner actions: change the local Postgres password (printed during the
+migration rehearsal), delete `.env.migrate`, and delete or let expire the old Render database.

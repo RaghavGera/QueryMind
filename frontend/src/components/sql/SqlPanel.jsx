@@ -4,9 +4,11 @@ import { Copy, Check, RefreshCcw, Sparkles, ChevronDown } from "lucide-react";
 import { highlightSqlLine } from "../../lib/sqlHighlight";
 import { cn } from "../../lib/utils";
 import { sliceLines } from "../../motion/text";
+import { inlineParams } from "../../lib/sqlDisplay";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
 
 const TYPE_MS = 450;
+const NO_PARAMS = [];
 
 /** Reveal ``length`` characters over TYPE_MS (fast enough to never be in the way). */
 function useQuickType(length, enabled) {
@@ -30,15 +32,27 @@ function useQuickType(length, enabled) {
   return count;
 }
 
-export default function SqlPanel({ sql, dialect = "PostgreSQL", onRerun, onExplain, rerunLabel = "Run again", animate = true }) {
+export default function SqlPanel({
+  sql,
+  params = NO_PARAMS,
+  dialect = "PostgreSQL",
+  onRerun,
+  onExplain,
+  rerunLabel = "Run again",
+  animate = true,
+}) {
   const reduced = useReducedMotion();
   const [copied, setCopied] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const lines = useMemo(() => sql.split("\n").map((line) => highlightSqlLine(line)), [sql]);
-  const count = useQuickType(sql.length, animate && !reduced);
+  // Show (and copy) the bound values in place of %s, so the query is readable
+  // and runnable as displayed. The server still sends them as parameters.
+  const shown = useMemo(() => inlineParams(sql, params), [sql, params]);
+  const lines = useMemo(() => shown.split("\n").map((line) => highlightSqlLine(line)), [shown]);
+  const count = useQuickType(shown.length, animate && !reduced);
+  const hasParams = params.length > 0;
 
   const copy = async () => {
-    await navigator.clipboard.writeText(sql);
+    await navigator.clipboard.writeText(shown);
     setCopied(true);
     setTimeout(() => setCopied(false), 1400);
   };
@@ -56,10 +70,10 @@ export default function SqlPanel({ sql, dialect = "PostgreSQL", onRerun, onExpla
       {!collapsed && (
         <>
           <div className="max-h-72 overflow-auto px-4 py-3">
-            <pre className="mono text-[13px] leading-relaxed" aria-label={sql}>
+            <pre className="mono text-[13px] leading-relaxed" aria-label={shown}>
               {sliceLines(lines, count).map((tokens, i) => (
                 <div key={i} className="flex gap-4" aria-hidden="true">
-                  <span className="select-none text-right text-ink-faint" style={{ width: 20 }}>
+                  <span className="w-5 shrink-0 select-none text-right text-ink-faint">
                     {i + 1}
                   </span>
                   <code className="whitespace-pre-wrap break-words">
@@ -90,6 +104,14 @@ export default function SqlPanel({ sql, dialect = "PostgreSQL", onRerun, onExpla
                 <RefreshCcw size={14} />
                 {rerunLabel}
               </button>
+            )}
+            {hasParams && (
+              <span
+                className="ml-auto hidden font-mono text-[10px] uppercase tracking-[0.16em] text-ink-faint sm:inline"
+                title="The values are shown in place; the server sends them separately as query parameters."
+              >
+                {params.length} parameter{params.length === 1 ? "" : "s"} shown inline
+              </span>
             )}
           </div>
         </>

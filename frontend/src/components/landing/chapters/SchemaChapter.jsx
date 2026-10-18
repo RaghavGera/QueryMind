@@ -7,7 +7,7 @@ import { Appear, ChapterHeading, useUniverseSignal } from "./shared";
 // arithmetic over real columns, and "region" maps to the closest real column
 // (the demo schema has customers.country, no region column).
 const MAPPINGS = [
-  { word: "“revenue”", to: "SUM(order_items.quantity × order_items.unit_price)", note: "metric = arithmetic over real columns" },
+  { word: "“revenue”", to: "SUM(order_items.quantity × order_items.unit_price)", note: "arithmetic over real columns, completed orders only" },
   { word: "“region”", to: "customers.country", note: "closest real column: there is no region column" },
   { word: "joins", to: "orders → customers · order_items → orders", note: "taken from your foreign keys" },
 ];

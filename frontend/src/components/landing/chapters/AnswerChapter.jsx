@@ -4,14 +4,14 @@ import CountUp from "../../../motion/CountUp";
 import { bump } from "../../../motion/math";
 import { Appear, ChapterHeading, useUniverseSignal } from "./shared";
 
-// Real output of the showcase query (grouped by country) on the QueryMind
-// demo database, captured 2026-10-07. India's total matches the live check.
+// Real output of the showcase query (grouped by country, completed orders
+// only) on the QueryMind demo database, captured 2026-10-18.
 const REVENUE = [
-  { country: "India", value: 734561 },
-  { country: "UK", value: 688224 },
-  { country: "Australia", value: 664939 },
-  { country: "Canada", value: 658418 },
-  { country: "USA", value: 651878 },
+  { country: "India", value: 706939 },
+  { country: "UK", value: 664678 },
+  { country: "Australia", value: 638080 },
+  { country: "Canada", value: 631282 },
+  { country: "USA", value: 629668 },
 ];
 const MAX = REVENUE[0].value;
 
@@ -52,7 +52,7 @@ function Answer() {
             <span className="display-md text-ink">India</span>
             <CountUp
               progress={total}
-              to={734561}
+              to={706939}
               className="font-display font-semibold tracking-tight text-gradient-neon [font-size:clamp(2.75rem,6vw,5.5rem)]"
             />
           </div>
@@ -71,8 +71,8 @@ function Answer() {
             ))}
           </div>
           <p className="mt-6 border-t border-white/[0.06] pt-4 text-xs leading-relaxed text-ink-faint">
-            Example run on the QueryMind demo database (500 customers, 2,000 orders). Every answer comes with the SQL that
-            produced it.
+            Example run on the QueryMind demo database (500 customers, 2,000 orders; revenue counts completed orders
+            only). Every answer comes with the SQL that produced it.
           </p>
         </div>
       </Appear>

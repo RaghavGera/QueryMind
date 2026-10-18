@@ -1,101 +1,123 @@
-# QueryMind: bring your own database (plan)
+# QueryMind: accounts and bring your own database (plan)
 
-> **Status: proposal (2026-10-18), not started.** It starts after the Render → Neon move, which is due before 2026-10-23. Scope chosen by the owner: **both** file uploads and live PostgreSQL connections.
+> **Status: approved scope, not started (2026-10-18).** The decisions below were made by the owner. Work goes phase by phase; each phase ends with tests, a live check, and a commit message for the owner.
 
-## Goal
+## Decisions
 
-Anyone can point QueryMind at their own data in two ways:
-1. **Upload files** (CSV / Excel). Each file becomes a table in a private, auto-expiring workspace.
-2. **Connect their own PostgreSQL** with a connection URL, ideally for a read-only user.
-
-QueryMind then works on that data exactly as it does on the demo database: clarifications, generated SQL, results, history.
-
-## What already works on any schema, and what doesn't
-
-| Part | Status |
+| Topic | Decision |
 |---|---|
-| Schema introspection, ambiguity detector, SQL generator, join planner | **Schema-agnostic**: they work from whatever schema they are given |
-| Schema introspection | Only reads the `public` schema (`app/schema.py`); needs a schema parameter for upload workspaces |
-| Extractor prompt (`app/intent_extractor.py`) | **Demo-specific**: every worked example uses `customers`/`orders`/`order_items`; the "top N means units sold" rule is shop logic |
-| Prompt trimming metric words, vague-term metric words | Mostly generic (revenue, price, amount, total, quantity); review them |
-| Database connection | One global connection from the `DB_*` variables; needs per-request routing to the active workspace |
-| Eval set | Demo-only; needs a second, unrelated sample dataset to prove the pipeline is schema-agnostic |
+| Accounts | Required for the whole app. **Sign in with Google**, implemented by us: the frontend uses Google Identity Services and FastAPI verifies Google's signed ID token. Users are stored in Neon. |
+| Who can sign in | Anyone with a Google account |
+| Session | The API issues its own signed, expiring session token, sent as `Authorization: Bearer`, plus a Content-Security-Policy on the site |
+| Usage limits | **20 questions per user per day** (every `/query` call counts, including clarification answers). Visitors who aren't signed in get **3 free tries per day** in the landing console, then "Sign in with Google to keep going". |
+| History and saved queries | Stored per account in Neon and synced across devices. Existing browser entries are imported on first sign-in. |
+| Data sources | Both **file uploads** (CSV / Excel) and **connecting your own PostgreSQL** |
+| Connection credentials | Encrypted on the server (Fernet), deleted after 24 hours |
+| Writes on uploaded or connected data | **Never.** Read-only, enforced by read-only transactions. Writes stay demo-only. |
+| New dependencies | `openpyxl` (Excel), `cryptography` (credential encryption), and probably `PyJWT` (token signing/verification; confirm before adding) |
+| Engines | PostgreSQL first |
 
-## Design
+## Owner actions (things only you can do)
 
-**Workspaces.**
-- Each browser gets an anonymous workspace token, sent as an `X-Workspace` header; the demo workspace is the default.
-- A registry table in `querymind_meta` records each workspace's kind (demo / upload / connection), owner token hash, creation and expiry time. Connection credentials are stored encrypted.
-- No accounts yet. A workspace belongs to the browser that created it.
+1. **Google Cloud: create an OAuth client ID** (type "Web application").
+   - Authorized JavaScript origins: `https://query-mind-tawny.vercel.app` and `http://localhost:5173`.
+   - Set up the OAuth consent screen with scopes `openid`, `email`, `profile`. A privacy-policy link is needed to publish; Phase 1 adds a Privacy page for it.
+2. **Render environment:**
+   - `GOOGLE_CLIENT_ID`;
+   - `SESSION_SECRET`, a long random string that signs session tokens;
+   - `CREDENTIAL_KEY` (Phase 6), the Fernet key that encrypts stored connection URLs.
+3. **Vercel environment:** `VITE_GOOGLE_CLIENT_ID`.
 
-**Uploads.**
-- Endpoint: `POST /workspaces/upload`, multipart.
-- Limits: CSV or XLSX, ≤ 10 files, ≤ 10 MB total, ≤ 200k rows per file.
-- Processing:
-  - infer column types (integer, numeric, date, timestamp, boolean, text);
-  - sanitize identifiers;
-  - create schema `ws_<id>` on Neon and load the rows with COPY;
-  - detect obvious foreign keys (`<table>_id` matching another table's key) so joins work.
-- The user sees the inferred tables, types and keys **before** importing.
-- No `.sql` dumps: running uploaded SQL would let anyone execute arbitrary statements.
-- Upload workspaces expire after 7 days. Cleanup runs at startup and on a timer. A storage quota protects Neon's free 0.5 GB.
+Never paste these values into chat; use the dashboards' environment screens.
 
-**Connections.**
-- Endpoint: `POST /workspaces/connect`, taking a PostgreSQL URL.
-- SSRF protection before connecting: resolve the host and refuse private, loopback, link-local and cloud-metadata addresses.
-- Connect with a short timeout and run a test query.
-- The credentials are encrypted at rest (Fernet, key from a server secret) and expire after 24 hours.
-- The UI shows the SQL to create a read-only user, and recommends it.
+## Phases and steps
 
-**Execution safety, required before any outside database is touched** (this is saved Track B):
-- every query in a `READ ONLY` transaction;
-- an 8-second statement timeout and a 1,000-row cap;
-- blocking endpoints moved off the event loop;
-- writes stay demo-only (or off) for uploads and connections.
+### Phase 1: accounts and usage limits
+1. **Tables** in `querymind_meta`, created at startup:
+   - `users`: Google subject id, email, name, avatar, created_at, last_login;
+   - `sessions`: id, user, expiry, revoked; supports sign-out;
+   - `usage`: per user per day, plus hashed-IP anonymous counters.
+2. **`POST /auth/google`.** Verifies the Google ID token:
+   - signature against Google's published keys;
+   - audience equals our client id;
+   - issuer is Google;
+   - not expired;
+   - email verified.
 
-**Abuse protection, required before public uploads** (saved Track C): per-IP rate limits on `/query` and on the upload and connect endpoints.
+   It then upserts the user and returns a session token (7-day expiry).
+3. **More endpoints:** `GET /auth/me` returns the user plus today's usage (`used`, `limit`, reset time). `POST /auth/logout` revokes the session.
+4. **Authorization:**
+   - `/query`, `/query/confirm` and the new APIs require a session.
+   - **Exception:** `/query` without a session is allowed on the demo workspace only, at 3 per day per visitor.
+   - **Limits:** a 21st question returns 429 with a clear message ("You've used today's 20 questions; they reset at 00:00 UTC").
+5. **Frontend:**
+   - a sign-in page with the Google button;
+   - an auth context, with the token kept in memory and in `localStorage`;
+   - `/app/*` redirects to sign-in when not signed in;
+   - an account menu (avatar, "12 / 20 questions today", sign out);
+   - the landing console shows "2 free tries left today", then a sign-in prompt.
+6. **Security headers:** a Content-Security-Policy in `frontend/vercel.json` that allows only our scripts plus Google's sign-in, and a Privacy page.
 
-**Pipeline generalization.**
-- Make the prompt schema-neutral: either describe the examples as illustrating a sample schema and tell the model to use only the provided tables, or generate examples from the active schema.
-- Keep shop-specific defaults (such as "top N = units sold") for the demo workspace only. On other schemas, ask instead.
-- Add a second sample dataset (for example employees / departments / projects) with its own eval questions.
+### Phase 2: history and saved queries in the account
+7. Add `query_history` and `saved_queries` tables keyed by user, storing the same snapshot shape as today: SQL, params, warnings, up to 200 rows.
+8. Add CRUD endpoints. The frontend `historyApi` / `savedApi` switch to them, with the same UI behaviour: Reopen without re-running, Re-run prefill, Save toggle.
+9. On first sign-in, import the browser's existing history and saved queries, then clear them locally.
 
-**Frontend.**
-- A **Connect** page (`/app/connect`) with two tabs:
-  - **Upload**: drag and drop, then a preview of the inferred schema, then import;
-  - **PostgreSQL**: URL field, a read-only user guide, then Test and Connect.
-- A workspace switcher in the top bar.
-- Schema tab, history and saved queries scoped to the active workspace.
-- A clear privacy note: where uploads live and when they are deleted.
+### Phase 3: safety foundation (required before anyone's own data)
+10. Move blocking endpoints to plain `def`, so they run in the threadpool and one slow request can't block others.
+11. Run every query in a `READ ONLY` transaction, with an 8 s statement timeout and a 1,000-row cap that is flagged in the UI.
 
-**Engines.** PostgreSQL first. MySQL and SQLite later, if wanted: they need their own introspection and SQL dialect.
+### Phase 4: workspaces
+12. Add a `workspaces` table: owner user, kind (demo / upload / connection), name, created_at, expiry. The demo workspace is shared and read-only.
+13. Route each request to the active workspace's database. Make introspection schema-aware (it currently reads only `public`), and cache the schema per workspace.
+14. History and saved queries record which workspace they belong to.
 
-**New dependencies** (approval needed): `openpyxl` (Excel files) and `cryptography` (credential encryption).
+### Phase 5: file uploads
+15. **Limits:** CSV or XLSX, ≤ 10 files, ≤ 10 MB total, ≤ 200k rows per file.
+16. **Processing:**
+    - infer column types (integer, numeric, date, timestamp, boolean, text);
+    - sanitize identifiers;
+    - detect foreign keys (`<table>_id` → that table's key).
 
-## Phases
+    A **preview** step shows the user what was found before anything is imported.
+17. **Import:** COPY into a private schema `ws_<id>` on Neon.
+18. **Expiry:** after 7 days, with cleanup at startup and on a timer, and a storage quota per user (Neon free tier is 0.5 GB).
+19. **No `.sql` dumps:** uploaded SQL could execute arbitrary statements.
 
-0. **Neon migration** (in progress; owner steps).
-1. **Safety foundation:** Track B (read-only, timeout, row cap, threadpool) and Track C (rate limits).
-2. **Workspace core:** schema-aware introspection, the workspace registry, per-request DB routing, demo as the default.
-3. **Uploads:** parsing, type inference, FK detection, preview, import, expiry and quotas.
-4. **Connections:** SSRF guard, encrypted credentials, connection test, read-only enforcement.
-5. **Pipeline generalization:** schema-neutral prompt, demo-only shop rules, second dataset and its eval.
-6. **Frontend:** Connect page, workspace switcher, scoped history and saved queries.
-7. **Docs and claims:** README, SETUP, a privacy note on the site, CHANGELOG.
+### Phase 6: connect your own PostgreSQL
+20. **SSRF guard:** resolve the host and refuse private, loopback, link-local and cloud-metadata addresses; re-check at connect time to defeat DNS rebinding.
+21. **Connection test:** connect with a timeout and a test query, and show the SQL to create a read-only user (recommended).
+22. **Storage:** credentials are encrypted with Fernet (`CREDENTIAL_KEY`) and deleted after 24 hours. They are never logged or returned to the browser.
 
-## Verification
+### Phase 7: an AI that works on any schema
+23. Make the extractor prompt schema-neutral: its examples are labelled as a sample schema, and the model must use only the provided tables.
+24. Restrict demo-only business rules to the demo workspace: "top N = units sold", and "sales = completed orders".
+25. Add a second, unrelated sample dataset (for example employees / departments / projects) with its own eval questions.
 
+### Phase 8: frontend for workspaces
+26. Add a **Connect** page (`/app/connect`) with two tabs:
+    - **Upload:** drag and drop, schema preview, import;
+    - **PostgreSQL:** URL, read-only user guide, test, connect.
+27. Add a workspace switcher in the top bar. Schema, history and saved queries follow the active workspace. Expiry dates are visible.
+
+### Phase 9: docs and live verification
+28. Update the README, SETUP, Privacy page and CHANGELOG.
+29. **Live checks:**
+    - sign in with Google;
+    - quota and anonymous tries;
+    - upload, then query;
+    - connect a read-only database, then query; writes are refused;
+    - the demo eval stays 41/41, and the second dataset's eval passes.
+
+## Verification (every phase)
 - **Unit tests:**
-  - type inference (dates, numbers with commas, empty cells);
-  - identifier sanitizing;
-  - FK detection;
-  - SSRF guard (private IPs, `localhost`, DNS rebinding, metadata IP);
-  - credential encryption round trip;
-  - workspace isolation (workspace A can never read workspace B).
-- **End to end:**
-  - upload the second sample dataset as CSVs and ask its eval questions;
-  - connect a local read-only Postgres user and confirm that writes and long queries are refused.
-- **Live:**
-  - the demo eval stays 41/41;
-  - the new dataset's eval passes;
-  - expired workspaces are actually deleted.
+  - token verification: bad audience, issuer or signature, expired tokens;
+  - session expiry and revocation;
+  - quota boundaries (20th allowed, 21st refused; the reset);
+  - anonymous limits;
+  - workspace isolation (user A can never read B's data or history);
+  - type inference, FK detection;
+  - SSRF cases;
+  - encryption round trip;
+  - read-only enforcement.
+- **Browser checks** in headless Chrome, plus the live eval after each deploy. Only measured numbers are reported.

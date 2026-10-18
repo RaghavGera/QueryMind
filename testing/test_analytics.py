@@ -89,8 +89,9 @@ def test_spending_increased_this_quarter(schema):
     assert 'ORDER BY (COALESCE("cur"."metric_value", 0) - COALESCE("prev"."metric_value", 0)) DESC' in sql
     assert 'AS "current_value"' in sql and 'AS "previous_value"' in sql and 'AS "change"' in sql
     assert '"orders"."order_date" >= %s AND "orders"."order_date" < %s' in sql
-    # current period first, then the previous one
-    assert result.params == ["2026-10-01", "2027-01-01", "2026-07-01", "2026-10-01"]
+    # current period first, then the previous one; spending counts completed orders only
+    assert sql.count('LOWER("orders"."status") = LOWER(%s)') == 2
+    assert result.params == ["Completed", "2026-10-01", "2027-01-01", "Completed", "2026-07-01", "2026-10-01"]
     # the quarter is not over yet -> say so
     assert any("still in progress" in w for w in result.warnings + structured.recognized_entities["assumptions"])
 
@@ -108,9 +109,9 @@ def test_last_period_is_complete_and_not_flagged_in_progress(schema):
         schema, _comparison_intent(period="last", grain="month"), "spending increased last month"
     )
 
-    assert result.params[:2] == ["2026-09-01", "2026-10-01"]
-    assert result.params[2:] == ["2026-08-01", "2026-09-01"]
-    assert not structured.recognized_entities.get("assumptions")
+    assert result.params == ["Completed", "2026-09-01", "2026-10-01", "Completed", "2026-08-01", "2026-09-01"]
+    # last month is over: no "still in progress" note, only the sales rule
+    assert structured.recognized_entities.get("assumptions") == ["Sales count completed orders only; pending and cancelled orders are excluded."]
 
 
 def test_comparison_applies_existing_filters_to_both_periods(schema):

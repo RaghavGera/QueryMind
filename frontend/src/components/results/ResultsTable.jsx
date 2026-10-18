@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { ArrowUp, ArrowDown } from "lucide-react";
 import { cn, formatNumber } from "../../lib/utils";
+import { humanizeColumn } from "../../lib/sqlDisplay";
 
 export default function ResultsTable({ columns, rows }) {
   const [sort, setSort] = useState({ key: null, dir: "asc" });
@@ -36,8 +37,8 @@ export default function ResultsTable({ columns, rows }) {
                 onClick={() => toggleSort(col)}
                 className="cursor-pointer select-none whitespace-nowrap border-b border-white/[0.08] px-4 py-3 font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-ink-dim transition-colors hover:text-accent-cyan"
               >
-                <span className="inline-flex items-center gap-1">
-                  {col}
+                <span className="inline-flex items-center gap-1" title={col}>
+                  {humanizeColumn(col)}
                   {sort.key === col && (sort.dir === "asc" ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
                 </span>
               </th>
@@ -56,7 +57,13 @@ export default function ResultsTable({ columns, rows }) {
             >
               {columns.map((col) => (
                 <td key={col} className="whitespace-nowrap border-b border-line-soft px-4 py-2.5 text-ink">
-                  {typeof row[col] === "number" ? formatNumber(row[col]) : row[col]}
+                  {row[col] === null || row[col] === undefined ? (
+                    <span className="text-ink-faint" title="NULL">—</span>
+                  ) : typeof row[col] === "number" ? (
+                    formatNumber(row[col])
+                  ) : (
+                    String(row[col])
+                  )}
                 </td>
               ))}
             </motion.tr>

@@ -83,8 +83,9 @@ def test_converter_removes_aggregation_expression_and_derives_fk_join(schema):
     intent = convert_query_intent(query_intent, "top products by quantity sold", schema=schema)
     result = SQLGenerator(schema).generate(intent)
     assert "SUM(order_items.quantity)" not in intent.columns
-    assert intent.tables == ["order_items", "products"]
-    assert intent.joins[0].left_column == "product_id"
+    # "quantity sold" is a sales metric: completed orders only, so orders joins in
+    assert intent.tables == ["order_items", "products", "orders"]
+    assert {j.left_column for j in intent.joins} == {"product_id", "order_id"}
     assert result.status == GenerationStatus.SUCCESS
     assert 'INNER JOIN "products" ON "order_items"."product_id" = "products"."product_id"' in result.sql
     assert 'ORDER BY SUM("order_items"."quantity") DESC' in result.sql

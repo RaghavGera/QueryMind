@@ -11,18 +11,18 @@ const REQUEST = `curl -X POST ${BASE_URL}/query \\
   -H "Content-Type: application/json" \\
   -d '{"question": "Which region generated the most revenue?"}'`;
 
-// The real response, captured from POST /query on 2026-10-07 (demo database).
+// The real response, captured from POST /query on 2026-10-18 (demo database).
 const RESPONSE = `{
   "status": "success",
-  "sql": "SELECT \\"customers\\".\\"country\\", SUM(\\"order_items\\".\\"quantity\\" * \\"order_items\\".\\"unit_price\\") AS ... LIMIT 1",
-  "params": [],
-  "warnings": [],
+  "sql": "SELECT \\"customers\\".\\"country\\", SUM(\\"order_items\\".\\"quantity\\" * \\"order_items\\".\\"unit_price\\") AS ... WHERE LOWER(\\"orders\\".\\"status\\") = LOWER(%s) ... LIMIT 1",
+  "params": ["Completed"],
+  "warnings": ["Sales count completed orders only; pending and cancelled orders are excluded."],
   "clarification_questions": [],
   "error_message": null,
   "has_ambiguities": false,
   "result": {
-    "columns": ["country", "sum_order_items_quantity_order_items_unit_price"],
-    "rows": [{ "country": "India", "sum_order_items_quantity_order_items_unit_price": 734561.0 }]
+    "columns": ["country", "sum_quantity_x_unit_price"],
+    "rows": [{ "country": "India", "sum_quantity_x_unit_price": 706939.0 }]
   }
 }`;
 

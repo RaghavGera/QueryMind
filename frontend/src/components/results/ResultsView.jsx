@@ -2,10 +2,34 @@ import { useEffect, useState } from "react";
 import { animate, motion, useMotionValue } from "framer-motion";
 import { Table2, LineChart as LineChartIcon, Inbox } from "lucide-react";
 import { cn, formatDuration } from "../../lib/utils";
+import { humanizeColumn } from "../../lib/sqlDisplay";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
 import CountUp from "../../motion/CountUp";
 import ResultsTable from "./ResultsTable";
 import ResultsChart from "./ResultsChart";
+
+/** A total over zero rows: SQL returns NULL, which means "nothing matched". */
+function EmptyMetric({ label, params }) {
+  return (
+    <div className="hud flex flex-col items-start gap-3 px-6 py-6">
+      <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-ink-faint">{humanizeColumn(label)}</span>
+      <span className="font-display text-3xl font-semibold text-ink-dim">No matching rows</span>
+      <p className="max-w-lg text-sm leading-relaxed text-ink-dim">
+        The query ran, but nothing in the database matched its filters, so there is nothing to total.
+        {params.length > 0 && " The filter values were:"}
+      </p>
+      {params.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {params.map((p, i) => (
+            <span key={i} className="chip font-mono !text-[11px] !text-accent-amber">
+              {String(p)}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 /** One row, one numeric column ("How many customers are there?"): show it big. */
 function MetricCard({ label, value }) {
@@ -21,7 +45,7 @@ function MetricCard({ label, value }) {
 
   return (
     <div className="hud flex flex-col items-start gap-2 px-6 py-6">
-      <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-ink-faint">{label}</span>
+      <span className="font-mono text-[11px] uppercase tracking-[0.2em] text-ink-faint">{humanizeColumn(label)}</span>
       <CountUp
         progress={progress}
         to={value}
@@ -32,7 +56,9 @@ function MetricCard({ label, value }) {
   );
 }
 
-export default function ResultsView({ result, executionMs, dialect = "PostgreSQL" }) {
+const NO_PARAMS = [];
+
+export default function ResultsView({ result, executionMs, params = NO_PARAMS, dialect = "PostgreSQL" }) {
   const [view, setView] = useState("table");
 
   if (!result || result.rows.length === 0) {
@@ -47,7 +73,8 @@ export default function ResultsView({ result, executionMs, dialect = "PostgreSQL
   const { columns, rows } = result;
   const numericCols = columns.filter((c) => typeof rows[0][c] === "number");
   const nonNumericCols = columns.filter((c) => typeof rows[0][c] !== "number");
-  const single = rows.length === 1 && columns.length === 1 && numericCols.length === 1;
+  const onlyValue = rows.length === 1 && columns.length === 1 ? rows[0][columns[0]] : undefined;
+  const single = onlyValue !== undefined && (typeof onlyValue === "number" || onlyValue === null);
   const canChart = !single && numericCols.length > 0 && nonNumericCols.length > 0 && columns.length <= 5;
   const xCandidate = nonNumericCols[0] ?? columns[0];
   const chartKind = /month|date|day|week|year|time/i.test(xCandidate) ? "line" : "bar";
@@ -78,8 +105,10 @@ export default function ResultsView({ result, executionMs, dialect = "PostgreSQL
         )}
       </div>
 
-      {single ? (
-        <MetricCard label={columns[0]} value={rows[0][columns[0]]} />
+      {single && onlyValue === null ? (
+        <EmptyMetric label={columns[0]} params={params} />
+      ) : single ? (
+        <MetricCard label={columns[0]} value={onlyValue} />
       ) : view === "table" || !canChart ? (
         <ResultsTable columns={columns} rows={rows} />
       ) : (

@@ -74,7 +74,9 @@ def test_having_on_arithmetic_aggregate(schema):
 
     assert result.status == GenerationStatus.SUCCESS, result
     assert 'HAVING SUM("order_items"."quantity" * "order_items"."unit_price") > %s' in result.sql
-    assert result.params == [10000]
+    # revenue counts completed orders only (WHERE before HAVING)
+    assert 'LOWER("orders"."status") = LOWER(%s)' in result.sql
+    assert result.params == ["Completed", 10000]
 
 
 @pytest.mark.parametrize("column", [

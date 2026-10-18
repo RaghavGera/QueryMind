@@ -10,7 +10,7 @@ import { pipelineStagesInitial, pipelineStagesAfterClarification, suggestedQuest
 
 /** The landing page's live console: the real pipeline against the real API. */
 export default function InteractiveDemo() {
-  const { status, startedAt, clarification, selectedChoice, sql, result, executionMs, warnings, error, ask, selectClarification, reset } =
+  const { status, startedAt, clarification, selectedChoice, sql, params, result, executionMs, warnings, error, ask, selectClarification, reset } =
     useQueryPipeline();
   const busy = status === "processing" || status === "generating";
 
@@ -51,8 +51,8 @@ export default function InteractiveDemo() {
               ))}
             </ul>
           )}
-          <SqlPanel sql={sql} onRerun={reset} rerunLabel="Ask another" />
-          <ResultsView result={result} executionMs={executionMs} />
+          <SqlPanel sql={sql} params={params} onRerun={reset} rerunLabel="Ask another" />
+          <ResultsView result={result} executionMs={executionMs} params={params} />
         </div>
       )}
     </div>

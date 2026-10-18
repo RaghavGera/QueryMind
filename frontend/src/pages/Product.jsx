@@ -46,7 +46,7 @@ const FEATURES = [
     detail: "A table when you need detail, a chart when the shape fits. History and saved queries keep every answer one click away.",
     demo: (
       <div className="hud space-y-2 px-4 py-4">
-        {[100, 94, 90, 89, 88].map((w, i) => (
+        {[100, 94, 90, 89, 89].map((w, i) => (
           <div key={w} className="h-2.5 rounded-full bg-white/[0.05]">
             <div
               className={i === 0 ? "h-full rounded-full bg-gradient-to-r from-accent-violet to-accent-magenta" : "h-full rounded-full bg-accent-violet/50"}
