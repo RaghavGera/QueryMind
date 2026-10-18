@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `scripts/migrate_db.py`: copy the database to another PostgreSQL server (check / copy / verify).
+  The copy runs in one transaction, refuses to overwrite a non-empty target, and `verify` compares
+  per-table row counts and a revenue checksum. Credentials come from a git-ignored `.env.migrate`
+  and reach `pg_dump`/`psql` only through libpq environment variables.
+- `DB_SSLMODE` (optional), needed for hosted Postgres such as Neon.
 - **Frontend redesign: "Neural Observatory".** The landing page is one continuous, scroll-driven
   camera flight: a WebGL universe (custom star shader, nebula, the demo schema as a constellation,
   a query beam, warp streaks) behind 9 pinned, scroll-scrubbed scenes that follow the real
@@ -108,6 +113,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- The database connection string was built by string formatting, so a password containing a space
+  or quote broke the connection. It is now built with psycopg's `make_conninfo`, which quotes every
+  value.
 - The Ask flow made you watch scripted progress: three "stages" ticked every 480 ms before the
   request resolved, and another 2.4 s of stages played *after* the answer arrived. Results now
   appear as soon as the backend answers (measured locally: 13 ms after the response), and the

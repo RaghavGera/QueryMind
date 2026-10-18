@@ -13,6 +13,7 @@ from typing import Any, Generator, List, Dict
 
 import psycopg
 from psycopg import Connection
+from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
 
@@ -34,19 +35,26 @@ class DatabaseConfig:
         self.user = os.getenv("DB_USER")
         self.password = os.getenv("DB_PASSWORD")
 
+        # Optional: "require" for hosted Postgres such as Neon. Unset keeps
+        # libpq's default ("prefer": SSL when the server offers it).
+        self.sslmode = os.getenv("DB_SSLMODE", "").strip() or None
+
         if not self.user or not self.password:
             raise ValueError("DB_USER and DB_PASSWORD must be set in environment variables")
 
     @property
     def connection_string(self) -> str:
-        """Build PostgreSQL connection string."""
-        return (
-            f"host={self.host} "
-            f"port={self.port} "
-            f"dbname={self.database} "
-            f"user={self.user} "
-            f"password={self.password}"
-        )
+        """Build a libpq connection string; psycopg quotes every value safely."""
+        params = {
+            "host": self.host,
+            "port": self.port,
+            "dbname": self.database,
+            "user": self.user,
+            "password": self.password,
+        }
+        if self.sslmode:
+            params["sslmode"] = self.sslmode
+        return make_conninfo(**params)
 
 
 class Database:

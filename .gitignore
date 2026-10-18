@@ -62,3 +62,6 @@ preview/
 
 # Personal notes
 locallyTest.md
+
+# Database migration credentials (scripts/migrate_db.py)
+.env.migrate

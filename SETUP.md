@@ -268,6 +268,7 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | Variable | Required | Notes |
 |---|---|---|
 | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` | yes | Set **all five**. Setting only `DATABASE_URL` is ignored and silently falls back to `localhost:5432` (this caused an outage once). |
+| `DB_SSLMODE` | no | libpq `sslmode`, e.g. `require` for Neon. Unset keeps libpq's default (`prefer`). |
 | `GEMINI_API_KEY`, `GROQ_API_KEY` | at least one | Each provider with a key joins the failover chain; one without a key is skipped silently. `GEMINI_API_KEY` enables all three Gemini entries. |
 | `LLM_PROVIDER_ORDER` | no | Try order, default `gemini-lite,groq,gemini-lite-alt,gemini-flash` (`gemini` = all three Gemini entries). Unknown names are ignored. |
 | `GEMINI_LITE_MODEL` | no | Default `gemini-3.5-flash-lite` (free tier: 500 requests/day, 15/minute). |
@@ -366,6 +367,27 @@ Before pushing, run everything the deploy depends on:
 ```bash
 pytest testing/ -q && (cd frontend && npm test && npm run build)
 ```
+
+## Moving the database to another server
+
+`scripts/migrate_db.py` copies the `public` schema and its data from one
+PostgreSQL server to another and then proves the copy is identical (row counts
+per table plus a revenue-by-country checksum). Put both URLs in `.env.migrate`
+(git-ignored); they are passed to `pg_dump`/`psql` through libpq environment
+variables, never on the command line, and are never printed.
+
+```bash
+# .env.migrate
+SOURCE_DATABASE_URL=postgresql://...   # e.g. Render "External Database URL"
+TARGET_DATABASE_URL=postgresql://...   # e.g. Neon direct connection string
+
+python scripts/migrate_db.py check     # both servers: tables and row counts
+python scripts/migrate_db.py copy      # one transaction; refuses a non-empty target
+python scripts/migrate_db.py verify    # exits non-zero unless everything matches
+```
+
+Then point the backend at the new server by updating the five `DB_*` variables
+(plus `DB_SSLMODE=require` for Neon) and check `GET /health`.
 
 ## Tests
 
