@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Query safety (Phase 3).** Every read runs in a `READ ONLY` transaction, so Postgres refuses a
+  write whatever the SQL says (tested with `SELECT ... INTO`, which passes the SELECT-only check).
+  Every query and confirmed write has a statement timeout (`QUERY_TIMEOUT_SECONDS`, default 8); a
+  timeout returns 504 with the SQL and gives the question back. Answers return at most
+  `MAX_RESULT_ROWS` (default 1,000) rows: `result.truncated` plus a warning, and the results
+  header reads "first 1,000 rows (capped)".
+- Endpoints are plain functions, so FastAPI runs them in its thread pool: one slow model or
+  database call no longer blocks other visitors. Two simultaneous 1-second questions: 2.08 s
+  before, 1.06 s after.
 - **History and saved queries in the account.** Signed in, they're stored in Neon
   (`querymind_meta.query_history`, `saved_queries`) and follow you to every device; signed out
   they stay in the browser. On sign-in the browser's entries are moved into the account
@@ -161,7 +170,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timestamps like `2025-06-01T00:00:00+05:30`, taken from the date as written so no viewer's
   timezone shifts it; the y-axis uses compact numbers ("280K") and is no longer clipped; long
   series skip labels instead of overlapping; tooltips show the full value ("264,713").
-- Favicon: the QueryMind mark replaces Vite's default; `apple-touch-icon.png` and a 512 px logo added.
+- **New logo, "Q-beam":** a Q whose tail is a glowing query beam, on a nebula tile. Used for the
+  favicon (replacing Vite's default), the navbar, sidebar, footer, sign-in card and loading screen;
+  `apple-touch-icon.png` and a 512 px `logo-512.png` added.
 - The SQL panel showed `%s` placeholders and hid the values (e.g. the dates "last month" resolved
   to). It now shows the bound values inline and copies runnable SQL; the server still sends them as
   parameters. Long first lines no longer squeeze the line-number column.

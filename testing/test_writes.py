@@ -3,7 +3,6 @@ Natural-language INSERT/UPDATE: value extraction -> SQL -> preview ->
 confirmation token -> guarded execution. No network or database needed.
 """
 
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -269,7 +268,7 @@ class _WriteDB:
         self.write_error = write_error
         self.writes = []
 
-    def execute_query(self, sql, params=None):
+    def execute_query(self, sql, params=None, max_rows=None):
         assert sql.startswith("SELECT COUNT(*)")
         return [{"affected_rows": self.matching_rows}]
 
@@ -280,8 +279,8 @@ class _WriteDB:
         return expected_rows
 
 
-def _call(coro):
-    response = asyncio.run(coro)
+def _call(response):
+    """An endpoint's return value as (status, body)."""
     if isinstance(response, JSONResponse):
         return response.status_code, json.loads(response.body)
     return 200, response

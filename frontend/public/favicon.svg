@@ -1,19 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- The QueryMind mark (components/ui/Logo.jsx) on a dark tile, strokes thickened to read at 16 px. -->
-  <defs>
-    <linearGradient id="g" x1="14" y1="14" x2="50" y2="50" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#c9c2ff"/>
-      <stop offset="0.55" stop-color="#8b7bff"/>
-      <stop offset="1" stop-color="#5eead4"/>
-    </linearGradient>
-    <radialGradient id="core" cx="32" cy="32" r="8" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#5eead4" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <rect width="64" height="64" rx="14" fill="#0b0a16"/>
-  <path d="M32 10 54 32 32 54 10 32Z" fill="none" stroke="url(#g)" stroke-width="3.4" stroke-linejoin="round"/>
-  <path d="M32 20 44 32 32 44 20 32Z" fill="url(#g)" opacity="0.3"/>
-  <path d="M10 32h44M32 10v44" stroke="url(#g)" stroke-width="1.4" opacity="0.5"/>
-  <circle cx="32" cy="32" r="8" fill="url(#core)"/>
+<!-- QueryMind favicon: a Q whose tail is a glowing query beam, on a nebula tile (site palette). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs>
+<radialGradient id="n" cx="30%" cy="22%" r="85%"><stop stop-color="#4c2fb0"/><stop offset=".55" stop-color="#1a1440"/><stop offset="1" stop-color="#0a0916"/></radialGradient>
+<linearGradient id="g" x1="12" y1="10" x2="48" y2="50" gradientUnits="userSpaceOnUse"><stop stop-color="#ddd6fe"/><stop offset=".5" stop-color="#9b8cff"/><stop offset="1" stop-color="#5eead4"/></linearGradient>
+<filter id="glow" filterUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+<rect width="64" height="64" rx="15" fill="url(#n)"/>
+<circle cx="50" cy="13" r="1.4" fill="#fff" opacity=".8"/><circle cx="12" cy="50" r="1.1" fill="#fff" opacity=".6"/><circle cx="54" cy="30" r="1" fill="#5eead4" opacity=".8"/>
+<circle cx="29" cy="29" r="15" fill="none" stroke="url(#g)" stroke-width="7.5"/>
+<path d="M37 37 50 50" stroke="#5eead4" stroke-width="7" stroke-linecap="round" filter="url(#glow)"/>
+<path d="M52 44Q52 50 58 50Q52 50 52 56Q52 50 46 50Q52 50 52 44Z" fill="#fff" filter="url(#glow)"/>
 </svg>

@@ -7,7 +7,6 @@ Covers, without touching the network or a database:
   * the "top N <things>" ranking safety net (the Q2 regression)
 """
 
-import asyncio
 import json
 import sys
 from pathlib import Path
@@ -144,7 +143,7 @@ class _FakeDB:
     def __init__(self, rows=None):
         self.rows = rows if rows is not None else []
 
-    def execute_query(self, query, params=None):
+    def execute_query(self, query, params=None, max_rows=None):
         return self.rows
 
 
@@ -164,7 +163,7 @@ def pipeline(monkeypatch):
 
     def post(question="show customers"):
         request = main_module.QueryRequest(question=question)
-        response = asyncio.run(main_module.run_query(request, db))
+        response = main_module.run_query(request, db)
         if isinstance(response, JSONResponse):
             return response.status_code, json.loads(response.body)
         return 200, response

@@ -1,6 +1,6 @@
 # QueryMind: accounts and bring your own database (plan)
 
-> **Status (2026-10-19): Phase 1 done and verified live; Phase 2 built and tested locally (live check after the owner's push); Phase 3 next.** The decisions below were made by the owner. Work goes phase by phase; each phase ends with tests, a live check, and a commit message for the owner.
+> **Status (2026-10-19): Phase 1 done and verified live; Phases 2 and 3 built and tested locally (live check after the owner's push); Phase 4 next.** The decisions below were made by the owner. Work goes phase by phase; each phase ends with tests, a live check, and a commit message for the owner.
 
 ## Decisions
 
@@ -73,6 +73,9 @@ Never paste these values into chat; use the dashboards' environment screens.
 9. On first sign-in, import the browser's existing history and saved queries, then clear them locally.
 
 ### Phase 3: safety foundation (required before anyone's own data)
+
+> Built 2026-10-19. `READ ONLY` transactions for every read (a `SELECT ... INTO` test write is refused by Postgres), `QUERY_TIMEOUT_SECONDS` (8) on every query and confirmed write (504, question given back), `MAX_RESULT_ROWS` (1,000) with `result.truncated` and a UI note, endpoints as plain functions (two 1 s questions: 2.08 s before, 1.06 s after). Local eval 40/41; the miss ("Which region generated the most revenue?" returning all 5 countries) also happens on the live server's older code, so it isn't from this phase.
+
 10. Move blocking endpoints to plain `def`, so they run in the threadpool and one slow request can't block others.
 11. Run every query in a `READ ONLY` transaction, with an 8 s statement timeout and a 1,000-row cap that is flagged in the UI.
 

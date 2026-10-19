@@ -281,6 +281,8 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | `BACKEND_CORS_ORIGIN_REGEX` | no | Origins matched by pattern as well. Default allows this project's Vercel deployment URLs (`https://query-mind-….vercel.app`) and `http://localhost:<port>` / `http://127.0.0.1:<port>`. Set to an empty string to disable. |
 | `QUERYMIND_ENABLE_WRITES` | no | `true` allows confirmed natural-language INSERT/UPDATE. **Off by default** - leave it off on a public demo database. |
 | `QUERYMIND_CONFIRM_SECRET` | with writes | Long random string; keeps confirmation tokens valid across restarts/instances. |
+| `QUERY_TIMEOUT_SECONDS` | no | Statement timeout for every query and confirmed write. Default `8`. A question that runs longer gets a 504 and is not counted. |
+| `MAX_RESULT_ROWS` | no | Rows returned for one answer. Default `1000`; a bigger result is cut, with `result.truncated: true` and a warning. |
 | `GOOGLE_CLIENT_ID` | for sign-in | The OAuth **Web application** client ID from Google Cloud (`….apps.googleusercontent.com`). Not a secret. Without it (or `SESSION_SECRET`) `POST /auth/google` returns 503 and nobody can sign in. |
 | `SESSION_SECRET` | for sign-in | Long random string (`python -c "import secrets; print(secrets.token_urlsafe(48))"`). Signs session tokens and keys the anonymous-visitor hash. Changing it signs everyone out and resets anonymous counts. |
 | `DAILY_QUESTION_LIMIT` | no | Questions per signed-in user per UTC day. Default `20`. |
@@ -511,6 +513,21 @@ A caller can also opt out per request with `"allow_writes": false` (the app's
 Settings page sends this; it defaults to `true` for API callers). A write needs
 **both** the server switch and the caller's opt-in. `GET /health` reports the
 server switch as `"writes_enabled"`.
+
+## Query safety
+
+Every read (answers and the schema reader) runs in a `READ ONLY` transaction, so
+Postgres refuses any write even if one slipped past the generator, for example
+`SELECT ... INTO`, which starts with SELECT but creates a table. Each statement
+has a `QUERY_TIMEOUT_SECONDS` timeout (set per transaction with `set_config`;
+`SET` can't take a bound parameter). An answer fetches at most
+`MAX_RESULT_ROWS + 1` rows: when there are more, `result.truncated` is `true`,
+the rows are cut to `MAX_RESULT_ROWS`, and a warning says so. A timeout returns
+**504** with the SQL that timed out, and the question is given back.
+
+The endpoints are plain functions, so FastAPI runs them in its thread pool and
+a slow model or database call doesn't block other requests. Measured with two
+simultaneous questions that each take 1 s: 2.08 s before, 1.06 s after.
 
 ## Request options for `POST /query`
 

@@ -254,7 +254,7 @@ def build_offline_runner():
             return build_mock_schema()
 
     class _NoRowsDB:
-        def execute_query(self, query, params=None):
+        def execute_query(self, query, params=None, max_rows=None):
             # The UPDATE preview counts matching rows first; pretend one matches.
             if "affected_rows" in query:
                 return [{"affected_rows": 1}]

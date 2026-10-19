@@ -83,7 +83,13 @@ export default function ResultsView({ result, executionMs, params = NO_PARAMS, d
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-ink-faint">
         <span>
-          {[`${rows.length} row${rows.length === 1 ? "" : "s"}`, executionMs != null && `answered in ${formatDuration(executionMs)}`, dialect]
+          {[
+            result.truncated
+              ? `first ${rows.length.toLocaleString("en")} rows (capped)`
+              : `${rows.length} row${rows.length === 1 ? "" : "s"}`,
+            executionMs != null && `answered in ${formatDuration(executionMs)}`,
+            dialect,
+          ]
             .filter(Boolean)
             .join(" · ")}
         </span>

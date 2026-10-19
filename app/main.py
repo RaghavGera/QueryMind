@@ -38,7 +38,7 @@ from app.auth import (
     verify_google_id_token,
 )
 from app import writes
-from app.database import Database, WriteConflictError, get_db, init_db
+from app.database import Database, QueryTimeoutError, WriteConflictError, get_db, init_db, max_result_rows
 from app.intent_converter import IntentConversionError, convert_query_intent
 from app.intent_extractor import IntentExtractionError, extract_intent
 from app.models import QueryType
@@ -514,7 +514,7 @@ _EXTRACTION_ERROR_STATUS = {
 
 
 @app.post("/query")
-async def run_query(
+def run_query(
     request: QueryRequest,
     db: Database = Depends(get_db),
     http_request: Request = None,
@@ -632,10 +632,20 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
 
     if succeeded:
         logger.debug("Generated SQL: %s | params: %r", generated.sql, generated.params)
+        cap = max_result_rows()
         try:
             rows = db.execute_query(
                 generated.sql,
-                tuple(generated.params)
+                tuple(generated.params),
+                max_rows=cap,
+            )
+        except QueryTimeoutError as exc:
+            # 504, so the question is given back (the usage middleware refunds 5xx).
+            return _error_response(
+                504,
+                f"{exc} Try a narrower question, for example with a filter or a smaller time range.",
+                sql=generated.sql,
+                params=generated.params,
             )
         except Exception as exc:
             return {
@@ -653,10 +663,16 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
             else []
         )
 
+        truncated = len(rows) > cap
         payload["result"] = {
             "columns": columns,
-            "rows": rows,
+            "rows": rows[:cap],
+            "truncated": truncated,
         }
+        if truncated:
+            payload["warnings"] = list(payload.get("warnings", [])) + [
+                f"Showing the first {cap:,} rows; the full result has more. Add a filter or a limit to see the rest."
+            ]
 
     else:
         payload["result"] = {
@@ -730,7 +746,7 @@ class ConfirmRequest(BaseModel):
 
 
 @app.post("/query/confirm")
-async def confirm_write(request: ConfirmRequest, db: Database = Depends(get_db)):
+def confirm_write(request: ConfirmRequest, db: Database = Depends(get_db)):
     """Execute a previously previewed INSERT/UPDATE, exactly as shown."""
     if not writes.writes_enabled():
         return _error_response(403, "Write queries are disabled on this deployment.")
@@ -748,6 +764,8 @@ async def confirm_write(request: ConfirmRequest, db: Database = Depends(get_db))
         )
     except WriteConflictError as exc:
         return _error_response(409, str(exc))
+    except QueryTimeoutError as exc:
+        return _error_response(504, str(exc))
     except ValueError as exc:
         return _error_response(400, str(exc))
     except Exception as exc:
@@ -760,7 +778,7 @@ async def confirm_write(request: ConfirmRequest, db: Database = Depends(get_db))
 
 
 @app.get("/health")
-async def health_check(db: Database = Depends(get_db)) -> dict:
+def health_check(db: Database = Depends(get_db)) -> dict:
     """
     Health check endpoint.
 
@@ -783,7 +801,7 @@ async def health_check(db: Database = Depends(get_db)) -> dict:
 
 
 @app.get("/schema")
-async def get_schema(db: Database = Depends(get_db)) -> dict:
+def get_schema(db: Database = Depends(get_db)) -> dict:
     """
     Retrieve the introspected database schema.
 
@@ -806,7 +824,7 @@ async def get_schema(db: Database = Depends(get_db)) -> dict:
 
 
 @app.get("/schema/tables")
-async def list_tables(db: Database = Depends(get_db)) -> dict:
+def list_tables(db: Database = Depends(get_db)) -> dict:
     """
     List all available tables in the database.
 
@@ -828,7 +846,7 @@ async def list_tables(db: Database = Depends(get_db)) -> dict:
 
 
 @app.get("/schema/tables/{table_name}")
-async def get_table_schema(table_name: str, db: Database = Depends(get_db)) -> dict:
+def get_table_schema(table_name: str, db: Database = Depends(get_db)) -> dict:
     """
     Get schema for a specific table.
 

@@ -70,6 +70,7 @@ Ask something vague and the response is a clarification question instead. Answer
 Design decisions that matter in production:
 
 - **Structured output only.** The extractor uses function calling, and JSON returned in the message body is accepted as a fallback. Free-form SQL from the model is never executed.
+- **Reads can't write, hang or flood.** Every query runs in a `READ ONLY` transaction (Postgres itself refuses a write, whatever the SQL says) with an 8-second statement timeout, and an answer returns at most 1,000 rows, flagged when capped. Endpoints run in a thread pool, so one slow question doesn't hold up anyone else's.
 - **Defense in depth for writes.** INSERT and UPDATE are off by default. When enabled, the backend returns a preview and a signed, single-use confirmation token, and it rolls back if the affected row count changes between preview and execution. An UPDATE without a WHERE clause is blocked. Natural-language DELETE is refused outright.
 - **A resilient model chain.** Requests go through an ordered chain of OpenAI-compatible providers: Gemini 3.5 Flash-Lite → Groq (Qwen) → Gemini 3.1 Flash-Lite → Gemini 3.8 Flash.
   - Rate limits, 5xx errors and 12-second timeouts move the request to the next entry.
@@ -225,10 +226,11 @@ Full details are in [SETUP.md](SETUP.md#request-options-for-post-query).
 - parameterized SQL generation, including comparisons, top-N per group, nested aggregates, anti-joins and time bucketing;
 - confirmed writes;
 - the web app;
-- Google sign-in with daily question limits.
+- Google sign-in with daily question limits;
+- history and saved queries in the account;
+- read-only transactions, query timeouts and row caps.
 
 **Next:** product hardening.
-- read-only transactions, query timeouts and row caps at the database layer;
 - bring your own data: CSV/XLSX uploads and read-only PostgreSQL connections;
 - API keys for programmatic access;
 - a query audit log with usage analytics;

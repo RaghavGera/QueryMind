@@ -1,6 +1,5 @@
 """GET /schema: the live schema plus the database name the app chrome shows."""
 
-import asyncio
 import sys
 from pathlib import Path
 
@@ -24,7 +23,7 @@ class _DB:
 
 def test_schema_response_includes_database_name(monkeypatch):
     monkeypatch.setattr(main_module, "SchemaIntrospector", _Introspector)
-    body = asyncio.run(main_module.get_schema(_DB()))
+    body = main_module.get_schema(_DB())
 
     assert body["database"] == "demo_db"
     assert set(body["tables"]) == set(build_mock_schema().tables)

@@ -25,6 +25,28 @@ class WriteConflictError(Exception):
     """A confirmed write no longer matches what the user was shown."""
 
 
+class QueryTimeoutError(Exception):
+    """A query ran past QUERY_TIMEOUT_SECONDS and Postgres cancelled it."""
+
+
+def _positive_env(name: str, default: float) -> float:
+    try:
+        value = float(os.getenv(name, default))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def query_timeout_ms() -> int:
+    """Statement timeout for every query and write (env QUERY_TIMEOUT_SECONDS, default 8)."""
+    return int(_positive_env("QUERY_TIMEOUT_SECONDS", 8) * 1000)
+
+
+def max_result_rows() -> int:
+    """Rows returned for one answer (env MAX_RESULT_ROWS, default 1000); more are flagged as capped."""
+    return int(_positive_env("MAX_RESULT_ROWS", 1000))
+
+
 class DatabaseConfig:
     """Database configuration from environment variables."""
 
@@ -112,20 +134,27 @@ class Database:
         finally:
             conn.close()
 
-    def execute_query(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
+    def execute_query(self, query: str, params: tuple = None, max_rows: int = None) -> List[Dict[str, Any]]:
         """
         Execute a SELECT query and return results as list of dictionaries.
+
+        Every read runs in a READ ONLY transaction (Postgres refuses any write
+        in it, whatever the SQL says) with a statement timeout of
+        QUERY_TIMEOUT_SECONDS.
 
         Args:
             query: SQL query string
             params: Optional query parameters for safe parameterization
+            max_rows: Fetch at most ``max_rows + 1`` rows, so the caller can
+                tell a capped result (more than ``max_rows``) from a complete one
 
         Returns:
             List of dictionaries, one per row
 
         Raises:
             ValueError: if query contains non-SELECT statements
-            psycopg.Error: on database errors
+            QueryTimeoutError: if the query ran longer than the timeout
+            psycopg.Error: on other database errors
         """
         # Safety check: only allow SELECT queries
         query_upper = query.strip().upper()
@@ -136,12 +165,20 @@ class Database:
             )
 
         with self.get_connection() as conn:
+            conn.read_only = True  # the transaction starts as BEGIN READ ONLY
             with conn.cursor() as cur:
-                if params:
-                    cur.execute(query, params)
-                else:
-                    cur.execute(query)
-                return cur.fetchall()
+                # A bound parameter can't be used with SET; set_config can. Local to this transaction.
+                cur.execute("SELECT set_config('statement_timeout', %s, true)", (str(query_timeout_ms()),))
+                try:
+                    if params:
+                        cur.execute(query, params)
+                    else:
+                        cur.execute(query)
+                except psycopg.errors.QueryCanceled as exc:
+                    raise QueryTimeoutError(
+                        f"The query took longer than {query_timeout_ms() / 1000:g} s and was stopped."
+                    ) from exc
+                return cur.fetchall() if max_rows is None else cur.fetchmany(max_rows + 1)
 
     def execute_write(
         self,
@@ -179,7 +216,14 @@ class Database:
         conn = psycopg.connect(self.config.connection_string)
         try:
             with conn.cursor() as cur:
-                cur.execute(statement, params or None)
+                cur.execute("SELECT set_config('statement_timeout', %s, true)", (str(query_timeout_ms()),))
+                try:
+                    cur.execute(statement, params or None)
+                except psycopg.errors.QueryCanceled as exc:
+                    conn.rollback()
+                    raise QueryTimeoutError(
+                        f"The change took longer than {query_timeout_ms() / 1000:g} s and was stopped; nothing was changed."
+                    ) from exc
                 affected = cur.rowcount
             if expected_rows is not None and affected != expected_rows:
                 conn.rollback()
