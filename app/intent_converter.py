@@ -304,6 +304,37 @@ def _default_ranking_metric(
 # "how many customers ...", "how many orders were placed ..."
 _HOW_MANY = re.compile(r"^\s*how\s+many\b", re.IGNORECASE)
 
+# "Which region generated the most revenue?" asks for one answer. The model
+# sometimes leaves out LIMIT 1 and returns every region sorted, so the limit is
+# set here (owner decision, 2026-10-19). Only for a singular subject: "Which
+# customers placed the most orders?" still lists several.
+SINGLE_ANSWER_NOTE = "The question asks for a single answer, so only the top result is shown."
+_SUPERLATIVE = re.compile(
+    r"\b(most|highest|largest|biggest|greatest|maximum|lowest|least|fewest|smallest|minimum|best|worst|top)\b",
+    re.IGNORECASE,
+)
+_WHICH_SUBJECT = re.compile(
+    r"^\s*(?:which|what)\s+([a-z_]+(?:\s+[a-z_]+){0,2}?)\s+"
+    r"(?:has|have|had|is|are|was|were|does|do|did|"
+    r"generated|generates|generate|made|makes|make|brought|brings|sold|sells|spent|spends|"
+    r"placed|places|got|gets|received|receives|earned|earns|contributed|contributes|ordered|orders)\b",
+    re.IGNORECASE,
+)
+_NOT_SINGLE = re.compile(r"\b(\d+|each|every|per|all)\b", re.IGNORECASE)
+
+
+def _single_answer_limit(question: str, order_by: List[OrderBy], limit: Optional[int]) -> Optional[int]:
+    """1 when the question asks "which <one thing> ... the most/least", else ``limit`` unchanged."""
+    if limit is not None or not order_by or _NOT_SINGLE.search(question) or not _SUPERLATIVE.search(question):
+        return limit
+    match = _WHICH_SUBJECT.match(question)
+    if not match:
+        return limit
+    head = match.group(1).split()[-1].lower()
+    if head.endswith("s") and not head.endswith(("ss", "us", "is")):
+        return limit  # plural subject ("which customers"): a list is wanted
+    return 1
+
 # Business rule (owner decision, 2026-10-18): sales count completed orders only.
 # Pending and cancelled orders are not sales. Applies to sales-language
 # questions over order line items, unless the question names a status itself.
@@ -778,6 +809,12 @@ def convert_query_intent(
     if comparison is None and query_intent.comparison:
         # Comparison period unclear: only the clarification matters.
         order_by = []
+
+    if top_n_per_group is None and comparison is None and query_type in (QueryType.SELECT, QueryType.AGGREGATE):
+        single = _single_answer_limit(original_question, order_by, limit)
+        if single != limit:
+            limit = single
+            assumptions.append(SINGLE_ANSWER_NOTE)
 
     tables = _referenced_tables(list(query_intent.tables), query_intent, aggregations)
     _apply_completed_sales_rule(

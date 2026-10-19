@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Workspaces (Phase 4).** A question runs against a workspace: the shared, read-only demo, or a
+  signed-in user's own (one per user; a new one replaces it; uploads expire after 7 days,
+  connections after 24 hours, removed at startup and on lookup). `GET /workspaces`,
+  `DELETE /workspaces/{id}`, `workspace_id` on `POST /query` and `GET /schema`. Every answer query
+  runs as a per-workspace `NOLOGIN` role (`SET LOCAL ROLE`) that can read only its own schema;
+  the demo's role can't read the account tables. The schema reader takes a schema name and is
+  cached per workspace for 5 minutes (it was 13 queries, 1.2 s locally, per question). History
+  and saved entries record `workspaceId`. Uploads and connections arrive in Phases 5 and 6.
 - **Query safety (Phase 3).** Every read runs in a `READ ONLY` transaction, so Postgres refuses a
   write whatever the SQL says (tested with `SELECT ... INTO`, which passes the SELECT-only check).
   Every query and confirmed write has a statement timeout (`QUERY_TIMEOUT_SECONDS`, default 8); a
@@ -162,6 +170,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- **"Which ... the most" answers one thing again.** "Which region generated the most revenue?"
+  started returning all 5 countries sorted (the model dropped `LIMIT 1`; seen locally and live on
+  2026-10-19, eval 40/41). The converter now sets `LIMIT 1` itself for a "which/what <singular>
+  ... most/highest/least/fewest" question that is ordered and has no limit, and says so in the
+  warnings. Plural subjects ("Which customers have placed the most orders?"), explicit numbers and
+  each/per/every/all are left alone. Eval back to 41/41; the region question passed 5/5 runs.
 - **Deleting no longer loops.** "Delete all customers" asked "Are you sure you want to delete ALL
   rows?" again after every "yes", although deletes are refused anyway. Delete requests are now
   refused at once ("Deleting data through natural language is not supported."), before the

@@ -1,6 +1,6 @@
 # QueryMind: accounts and bring your own database (plan)
 
-> **Status (2026-10-19): Phase 1 done and verified live; Phases 2 and 3 built and tested locally (live check after the owner's push); Phase 4 next.** The decisions below were made by the owner. Work goes phase by phase; each phase ends with tests, a live check, and a commit message for the owner.
+> **Status (2026-10-19): Phase 1 done and verified live; Phases 1–3 live; Phase 4 built and tested locally (live check after the owner's push); Phase 5 next.** The decisions below were made by the owner. Work goes phase by phase; each phase ends with tests, a live check, and a commit message for the owner.
 
 ## Decisions
 
@@ -80,6 +80,11 @@ Never paste these values into chat; use the dashboards' environment screens.
 11. Run every query in a `READ ONLY` transaction, with an 8 s statement timeout and a 1,000-row cap that is flagged in the UI.
 
 ### Phase 4: workspaces
+
+> Built 2026-10-19: `workspaces` table (one per user), `/workspaces` endpoints, `workspace_id` on `/query` and `/schema`, per-workspace NOLOGIN roles with `SET LOCAL ROLE` (isolation tested: no access to the demo, the account tables or another workspace), schema reader per schema with a 5-minute cache, expiry cleanup, `workspaceId` on history entries. Local eval 41/41 with every demo question running as `querymind_demo`. Live: check `/health` → `query_roles` (the local database is a superuser; Neon's owner role is not).
+
+> Decisions (owner, 2026-10-19): only signed-in users create workspaces (signed-out visitors keep the demo); **one active workspace per user**, so a new upload or connection replaces the old one; **25 MB** of uploaded data per user; on expiry the data is deleted but history and saved queries stay, marked "workspace expired" (Reopen still shows the stored result). Isolation: every answer query runs as a per-workspace NOLOGIN role (`SET LOCAL ROLE`) that can read only that workspace's schema; if roles can't be created, the demo keeps working and workspace creation is refused.
+
 12. Add a `workspaces` table: owner user, kind (demo / upload / connection), name, created_at, expiry. The demo workspace is shared and read-only.
 13. Route each request to the active workspace's database. Make introspection schema-aware (it currently reads only `public`), and cache the schema per workspace.
 14. History and saved queries record which workspace they belong to.

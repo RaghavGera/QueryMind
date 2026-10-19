@@ -198,6 +198,7 @@ docs/                 known issues and phase documentation
 | `POST /auth/google` | Exchange a Google access token (or ID token) for a session token |
 | `GET /auth/me`, `GET /auth/usage`, `POST /auth/logout` | The signed-in user, today's question count, sign-out |
 | `/me/history`, `/me/saved`, `POST /me/import` | The signed-in user's query history and saved queries |
+| `GET /workspaces`, `DELETE /workspaces/{id}` | The demo plus your own workspace; `workspace_id` on `/query` and `/schema` picks one |
 
 `POST /query` and `/query/confirm` need `Authorization: Bearer <session token>`. Without one, a caller gets the anonymous daily allowance, and `/query/confirm` is refused.
 

@@ -23,7 +23,7 @@ class _DB:
 
 def test_schema_response_includes_database_name(monkeypatch):
     monkeypatch.setattr(main_module, "SchemaIntrospector", _Introspector)
-    body = main_module.get_schema(_DB())
+    body = main_module.get_schema(_DB(), workspace_id=None, authorization=None)
 
     assert body["database"] == "demo_db"
     assert set(body["tables"]) == set(build_mock_schema().tables)

@@ -529,6 +529,40 @@ The endpoints are plain functions, so FastAPI runs them in its thread pool and
 a slow model or database call doesn't block other requests. Measured with two
 simultaneous questions that each take 1 s: 2.08 s before, 1.06 s after.
 
+## Workspaces
+
+A workspace is the data a question runs against. `demo` is the shared sample
+database (schema `public`), read-only and available to everyone. A signed-in
+user can have **one** workspace of their own (uploads in Phase 5, PostgreSQL
+connections in Phase 6); creating another replaces it. Uploads expire after 7
+days and connections after 24 hours; expired workspaces are deleted at startup
+and whenever they are looked up. History and saved queries keep a `workspaceId`
+and outlive the workspace.
+
+| Endpoint / field | Purpose |
+|---|---|
+| `GET /workspaces` | The demo plus the caller's own workspace; `can_create` says whether they can add one |
+| `DELETE /workspaces/{id}` | Delete your workspace and its data (signed in) |
+| `POST /query {"workspace_id": ...}` | Ask a workspace; omitted or `"demo"` means the demo. Someone else's id is a 404, signed out a 401 |
+| `GET /schema?workspace_id=...` | That workspace's schema |
+| `GET /health` → `query_roles` | Whether the per-workspace roles below are in place |
+
+**Isolation.** Every answer query runs inside its read-only transaction as a
+`NOLOGIN` role (`SET LOCAL ROLE`): `querymind_demo` can read the demo tables
+only, and each workspace's `querymind_ws_<id>` can read only its schema
+`ws_<id>`, which is also the query's `search_path`. Neither can read the
+`querymind_meta` account tables or another user's data, so even a generator bug
+could not reach them. The roles are created at startup; if that fails, demo
+questions run as the connection's own user, as before, `query_roles` is
+`false`, and workspaces can't be created. The schema reader runs as the owner
+but only reads the workspace's own schema (`information_schema` hides
+constraints from non-owners), and its result is cached per workspace for 5
+minutes. Measured locally, reading the demo schema took 1.2 s per question
+before the cache (13 queries).
+
+Writes stay demo-only: an INSERT/UPDATE question on your own data is blocked
+("Your own data is read-only").
+
 ## Request options for `POST /query`
 
 | Field | Default | Meaning |

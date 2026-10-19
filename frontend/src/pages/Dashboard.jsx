@@ -23,11 +23,15 @@ import {
   pipelineStagesAfterClarification,
 } from "../data/mockData";
 
+// Which data questions go to. Only the demo until the workspace switcher
+// (Phase 8); entries record it so history can follow the active workspace.
+const WORKSPACE_ID = "demo";
+
 export default function Dashboard() {
   const pipeline = useQueryPipeline({
     onComplete: (entry) => {
       library
-        .addHistory({ id: newId("q"), executedAt: new Date().toISOString(), ...entry })
+        .addHistory({ id: newId("q"), executedAt: new Date().toISOString(), workspaceId: WORKSPACE_ID, ...entry })
         .catch(() => setNotice("This answer couldn't be added to your history. It will still show here."));
     },
   });
@@ -126,7 +130,7 @@ export default function Dashboard() {
       : (() => {
           const snapshot = makeSnapshot({ sql, params, result, warnings });
           if (restored) snapshot.totalRows = restored.totalRows; // rows were already capped
-          return library.save({ question, resolved: selectedChoice, durationMs: executionMs, snapshot });
+          return library.save({ question, resolved: selectedChoice, durationMs: executionMs, snapshot, workspaceId: WORKSPACE_ID });
         })();
     done.catch((e) => setNotice(e.message));
   };

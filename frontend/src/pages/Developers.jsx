@@ -11,12 +11,15 @@ const REQUEST = `curl -X POST ${BASE_URL}/query \\
   -H "Content-Type: application/json" \\
   -d '{"question": "Which region generated the most revenue?"}'`;
 
-// The real response, captured from POST /query on 2026-10-18 (demo database).
+// The real response, captured from POST /query on 2026-10-19 (demo database).
 const RESPONSE = `{
   "status": "success",
   "sql": "SELECT \\"customers\\".\\"country\\", SUM(\\"order_items\\".\\"quantity\\" * \\"order_items\\".\\"unit_price\\") AS ... WHERE LOWER(\\"orders\\".\\"status\\") = LOWER(%s) ... LIMIT 1",
   "params": ["Completed"],
-  "warnings": ["Sales count completed orders only; pending and cancelled orders are excluded."],
+  "warnings": [
+    "The question asks for a single answer, so only the top result is shown.",
+    "Sales count completed orders only; pending and cancelled orders are excluded."
+  ],
   "clarification_questions": [],
   "error_message": null,
   "has_ambiguities": false,

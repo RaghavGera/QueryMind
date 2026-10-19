@@ -205,3 +205,47 @@ def test_sales_rule_ignores_non_sales_questions(schema):
     assert _status_conditions(convert_query_intent(counting, "How many customers are there?", schema=schema)) == []
     priced = QueryIntent(query_type="aggregate", tables=["products"], aggregations=["AVG(products.price)"])
     assert _status_conditions(convert_query_intent(priced, "What is the average product price?", schema=schema)) == []
+
+
+def _ranked_intent(**overrides):
+    fields = dict(
+        query_type="aggregate",
+        tables=["customers", "orders", "order_items"],
+        columns=["customers.country"],
+        aggregations=["SUM(order_items.quantity * order_items.unit_price)"],
+        group_by=["customers.country"],
+        order_by={"column": "SUM(order_items.quantity * order_items.unit_price)", "direction": "desc"},
+    )
+    fields.update(overrides)
+    return QueryIntent(**fields)
+
+
+@pytest.mark.parametrize("question", [
+    "Which region generated the most revenue?",
+    "Which country generates the most revenue?",
+    "What product has the highest price?",
+    "Which product category has the fewest products?",
+    "Which month had the lowest revenue?",
+])
+def test_a_single_answer_question_gets_limit_1(schema, question):
+    from app.intent_converter import SINGLE_ANSWER_NOTE
+    intent = convert_query_intent(_ranked_intent(), question, schema=schema)
+    assert intent.limit == 1
+    assert SINGLE_ANSWER_NOTE in intent.recognized_entities["assumptions"], "never applied silently"
+
+
+@pytest.mark.parametrize("question", [
+    "Which customers have placed the most orders?",   # plural: a list is wanted
+    "Which 3 countries generate the most revenue?",   # an explicit number
+    "Which country in each region has the most revenue?",
+    "Show revenue per country, highest first.",       # not a "which" question
+    "Which countries have the most customers?",
+])
+def test_plural_or_counted_questions_keep_their_rows(schema, question):
+    assert convert_query_intent(_ranked_intent(), question, schema=schema).limit is None
+
+
+def test_an_existing_limit_or_no_ordering_is_left_alone(schema):
+    question = "Which region generated the most revenue?"
+    assert convert_query_intent(_ranked_intent(limit=5), question, schema=schema).limit == 5
+    assert convert_query_intent(_ranked_intent(order_by=None), question, schema=schema).limit is None

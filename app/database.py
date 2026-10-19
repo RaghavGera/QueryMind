@@ -8,11 +8,12 @@ This module handles:
 """
 
 import os
+import re
 from contextlib import contextmanager
 from typing import Any, Generator, List, Dict
 
 import psycopg
-from psycopg import Connection
+from psycopg import Connection, sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
 from dotenv import load_dotenv
@@ -23,6 +24,10 @@ load_dotenv()
 
 class WriteConflictError(Exception):
     """A confirmed write no longer matches what the user was shown."""
+
+
+# Schema and role names the app creates itself: ws_<id>, querymind_ws_<id>, querymind_demo, public.
+SAFE_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
 
 class QueryTimeoutError(Exception):
@@ -134,7 +139,14 @@ class Database:
         finally:
             conn.close()
 
-    def execute_query(self, query: str, params: tuple = None, max_rows: int = None) -> List[Dict[str, Any]]:
+    def execute_query(
+        self,
+        query: str,
+        params: tuple = None,
+        max_rows: int = None,
+        search_path: str = None,
+        role: str = None,
+    ) -> List[Dict[str, Any]]:
         """
         Execute a SELECT query and return results as list of dictionaries.
 
@@ -147,6 +159,10 @@ class Database:
             params: Optional query parameters for safe parameterization
             max_rows: Fetch at most ``max_rows + 1`` rows, so the caller can
                 tell a capped result (more than ``max_rows``) from a complete one
+            search_path: Resolve unqualified table names in this schema only
+                (a workspace's ``ws_<id>``)
+            role: Run as this NOLOGIN role (``SET LOCAL ROLE``), which can read
+                only its own workspace's tables
 
         Returns:
             List of dictionaries, one per row
@@ -164,11 +180,23 @@ class Database:
                 "Found: " + query_upper.split()[0]
             )
 
+        for name in (search_path, role):
+            if name is not None and not SAFE_IDENTIFIER.match(name):
+                raise ValueError(f"Not a valid schema or role name: {name!r}")
+
         with self.get_connection() as conn:
             conn.read_only = True  # the transaction starts as BEGIN READ ONLY
             with conn.cursor() as cur:
                 # A bound parameter can't be used with SET; set_config can. Local to this transaction.
-                cur.execute("SELECT set_config('statement_timeout', %s, true)", (str(query_timeout_ms()),))
+                if search_path:
+                    cur.execute(
+                        "SELECT set_config('statement_timeout', %s, true), set_config('search_path', quote_ident(%s), true)",
+                        (str(query_timeout_ms()), search_path),
+                    )
+                else:
+                    cur.execute("SELECT set_config('statement_timeout', %s, true)", (str(query_timeout_ms()),))
+                if role:
+                    cur.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
                 try:
                     if params:
                         cur.execute(query, params)

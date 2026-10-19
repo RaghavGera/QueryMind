@@ -38,6 +38,7 @@ from app.auth import (
     verify_google_id_token,
 )
 from app import writes
+from app.workspaces import DEMO, DEMO_ID, SchemaCache, ScopedDatabase, Workspace, WorkspaceError, WorkspaceStore
 from app.database import Database, QueryTimeoutError, WriteConflictError, get_db, init_db, max_result_rows
 from app.intent_converter import IntentConversionError, convert_query_intent
 from app.intent_extractor import IntentExtractionError, extract_intent
@@ -110,6 +111,22 @@ def get_account_store() -> AccountStore:
     return _store
 
 
+_workspace_store: Optional[WorkspaceStore] = None
+schema_cache = SchemaCache()
+
+
+def get_workspace_store() -> WorkspaceStore:
+    global _workspace_store
+    if _workspace_store is None:
+        _workspace_store = WorkspaceStore(get_db())
+    return _workspace_store
+
+
+def _roles_ready() -> bool:
+    """The read-only query roles exist (set up at startup)."""
+    return _workspace_store is not None and _workspace_store.roles_available
+
+
 def resolve_principal(request: Request, store: AccountStore) -> Principal:
     """Service key > valid session > anonymous visitor. Raises AuthError for bad tokens."""
     if service_key_matches(request.headers.get("x-service-key")):
@@ -158,6 +175,7 @@ async def usage_limits(request: Request, call_next):
     try:
         store = get_account_store()
         principal = await run_in_threadpool(resolve_principal, request, store)
+        request.state.principal = principal
     except AuthError as exc:
         return JSONResponse(
             status_code=exc.status,
@@ -250,6 +268,14 @@ async def startup_event():
     except Exception:
         # Without these tables sign-in fails loudly per request; the demo still runs.
         logger.exception("Could not create the account tables (querymind_meta)")
+    try:
+        store = get_workspace_store()
+        store.ensure_schema()
+        removed = store.delete_expired()
+        if removed:
+            logger.info("Removed %d expired workspace(s)", removed)
+    except Exception:
+        logger.exception("Could not set up workspaces; the demo still runs")
     if not auth_configured():
         logger.warning("Sign-in is not configured: set GOOGLE_CLIENT_ID and SESSION_SECRET.")
 
@@ -451,6 +477,68 @@ def import_browser_entries(body: ImportBody, authorization: Optional[str] = Head
     return {"imported": added, "skipped": skipped}
 
 
+def _workspace_for(principal: Optional[Principal], workspace_id: Optional[str]) -> Workspace:
+    """The workspace a request may use: the demo, or the signed-in user's own."""
+    if not workspace_id or workspace_id == DEMO_ID:
+        return DEMO
+    if principal is None or principal.kind != "user":
+        raise WorkspaceError("Sign in to ask questions about your own data.", status=401)
+    workspace = get_workspace_store().for_user(principal.user.id)
+    if workspace is None or workspace.id != str(workspace_id):
+        raise WorkspaceError("That workspace doesn't exist or has expired.", status=404)
+    return workspace
+
+
+def _scoped(db, workspace: Workspace):
+    """``db`` as ``workspace`` sees it. Without the query roles the demo runs as before."""
+    if workspace.is_demo and not _roles_ready():
+        return db
+    return ScopedDatabase(db, workspace)
+
+
+def _introspect(db) -> DatabaseSchema:
+    """The schema of the workspace behind ``db``, cached per workspace."""
+    if isinstance(db, ScopedDatabase):
+        workspace = db.workspace
+        return schema_cache.get(workspace.id, lambda: SchemaIntrospector(db.db, workspace.schema).introspect())
+    return SchemaIntrospector(db).introspect()
+
+
+def _optional_principal(authorization: Optional[str]) -> Optional[Principal]:
+    try:
+        return _session_principal(authorization) if authorization else None
+    except AuthError:
+        return None
+
+
+def _workspace_error(exc: WorkspaceError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status, content={"status": "error", "error": str(exc)})
+
+
+@app.get("/workspaces")
+def list_workspaces(authorization: Optional[str] = Header(default=None)):
+    """The demo, plus the signed-in user's workspace if they have one."""
+    principal = _optional_principal(authorization)
+    workspaces = [DEMO.to_dict()]
+    if principal is not None:
+        own = get_workspace_store().for_user(principal.user.id)
+        if own is not None:
+            workspaces.append(own.to_dict())
+    return {"workspaces": workspaces, "can_create": principal is not None and _roles_ready(), "per_user": 1}
+
+
+@app.delete("/workspaces/{workspace_id}")
+def delete_workspace(workspace_id: str, authorization: Optional[str] = Header(default=None)):
+    try:
+        principal = _session_principal(authorization)
+    except AuthError as exc:
+        return _auth_error(exc)
+    if not get_workspace_store().delete(principal.user.id, workspace_id):
+        return _workspace_error(WorkspaceError("That workspace doesn't exist or has expired.", status=404))
+    schema_cache.forget(workspace_id)
+    return {"status": "deleted"}
+
+
 def _schema_context(schema: DatabaseSchema) -> dict:
     relationships = []
 
@@ -482,6 +570,8 @@ class QueryRequest(BaseModel):
     allow_full_table_write: bool = False
     # The caller's opt-in to writes; a write also needs QUERYMIND_ENABLE_WRITES.
     allow_writes: bool = True
+    # Which data to ask: "demo" (default) or the signed-in user's workspace id.
+    workspace_id: str | None = None
 
 
 def _error_response(
@@ -534,8 +624,14 @@ def run_query(
             f"{request.clarification_context.strip()}"
         )
 
+    principal = getattr(getattr(http_request, "state", None), "principal", None)
     try:
-        result = _run_pipeline(question, request, db)
+        workspace = _workspace_for(principal, request.workspace_id)
+    except WorkspaceError as exc:
+        return _workspace_error(exc)
+
+    try:
+        result = _run_pipeline(question, request, _scoped(db, workspace))
     except Exception as exc:  # Last-resort guard: never leak a traceback.
         logger.exception("Unhandled error while answering %r", question)
         return _error_response(
@@ -557,7 +653,7 @@ def run_query(
 
 def _run_pipeline(question: str, request: QueryRequest, db: Database):
     try:
-        schema = SchemaIntrospector(db).introspect()
+        schema = _introspect(db)
     except Exception as exc:
         return _error_response(
             500, "Database schema could not be inspected.", details=str(exc)
@@ -628,6 +724,15 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
     succeeded = generated.status.value in {"success", "success_with_warnings"} and generated.sql
 
     if succeeded and structured_intent.query_type in (QueryType.INSERT, QueryType.UPDATE):
+        if getattr(db, "read_only_workspace", False):
+            return {
+                **payload,
+                "status": "blocked",
+                "sql": None,
+                "params": [],
+                "error_message": "Your own data is read-only: QueryMind never changes it.",
+                "result": {"columns": [], "rows": []},
+            }
         return _prepare_write(structured_intent, generated, generator, payload, db, request.allow_writes)
 
     if succeeded:
@@ -797,11 +902,17 @@ def health_check(db: Database = Depends(get_db)) -> dict:
         },
         # Lets the UI show whether its "Allow write queries" setting can take effect.
         "writes_enabled": writes.writes_enabled(),
+        # Answer queries run as read-only per-workspace roles (and own data can be added).
+        "query_roles": _roles_ready(),
     }
 
 
 @app.get("/schema")
-def get_schema(db: Database = Depends(get_db)) -> dict:
+def get_schema(
+    db: Database = Depends(get_db),
+    workspace_id: Optional[str] = None,
+    authorization: Optional[str] = Header(default=None),
+) -> dict:
     """
     Retrieve the introspected database schema.
 
@@ -811,11 +922,15 @@ def get_schema(db: Database = Depends(get_db)) -> dict:
     - Foreign key relationships
     """
     try:
-        introspector = SchemaIntrospector(db)
-        schema = introspector.introspect()
+        workspace = _workspace_for(_optional_principal(authorization), workspace_id)
+    except WorkspaceError as exc:
+        return _workspace_error(exc)
+    try:
+        schema = _introspect(_scoped(db, workspace))
         # The database name lets the UI show the real workspace (and doubles
         # as its connection check: /health is blocked by some ad blockers).
-        return {"database": db.config.database, **schema.to_dict()}
+        name = db.config.database if workspace.is_demo else workspace.name
+        return {"database": name, "workspace": workspace.to_dict(), **schema.to_dict()}
     except Exception as e:
         return JSONResponse(
             status_code=500,

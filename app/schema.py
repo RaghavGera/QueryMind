@@ -95,8 +95,11 @@ class SchemaIntrospector:
     directly from PostgreSQL system catalogs.
     """
 
-    def __init__(self, db: Database):
+    def __init__(self, db: Database, schema_name: str = "public"):
+        # Which Postgres schema to read: "public" for the demo, "ws_<id>" for
+        # an uploaded workspace. Always passed as a bound parameter.
         self.db = db
+        self.schema_name = schema_name
 
     def introspect(self) -> DatabaseSchema:
         """
@@ -133,7 +136,7 @@ class SchemaIntrospector:
 
     def _get_tables(self) -> List[str]:
         """
-        Get all user-defined tables in the public schema.
+        Get all user-defined tables in this introspector's schema.
 
         Returns:
             List of table names
@@ -141,11 +144,11 @@ class SchemaIntrospector:
         query = """
             SELECT table_name
             FROM information_schema.tables
-            WHERE table_schema = 'public'
+            WHERE table_schema = %s
               AND table_type = 'BASE TABLE'
             ORDER BY table_name
         """
-        results = self.db.execute_query(query)
+        results = self.db.execute_query(query, (self.schema_name,))
         return [row["table_name"] for row in results]
 
     def _get_columns(self, table_name: str) -> Dict[str, ColumnInfo]:
@@ -166,11 +169,11 @@ class SchemaIntrospector:
                 column_default,
                 character_maximum_length
             FROM information_schema.columns
-            WHERE table_schema = 'public'
+            WHERE table_schema = %s
               AND table_name = %s
             ORDER BY ordinal_position
         """
-        results = self.db.execute_query(query, (table_name,))
+        results = self.db.execute_query(query, (self.schema_name, table_name))
 
         columns = {}
         for row in results:
@@ -200,11 +203,11 @@ class SchemaIntrospector:
             FROM pg_index i
             JOIN pg_attribute a ON a.attrelid = i.indrelid
                 AND a.attnum = ANY(i.indkey)
-            WHERE i.indrelid = %s::regclass
+            WHERE i.indrelid = (quote_ident(%s) || '.' || quote_ident(%s))::regclass
               AND i.indisprimary
             ORDER BY a.attnum
         """
-        results = self.db.execute_query(query, (table_name,))
+        results = self.db.execute_query(query, (self.schema_name, table_name))
         return [row["column_name"] for row in results]
 
     def _get_foreign_keys(self, table_name: str) -> List[ForeignKey]:
@@ -230,11 +233,11 @@ class SchemaIntrospector:
                 ON ccu.constraint_name = tc.constraint_name
                 AND ccu.table_schema = tc.table_schema
             WHERE tc.constraint_type = 'FOREIGN KEY'
-              AND tc.table_schema = 'public'
+              AND tc.table_schema = %s
               AND tc.table_name = %s
             ORDER BY kcu.ordinal_position
         """
-        results = self.db.execute_query(query, (table_name,))
+        results = self.db.execute_query(query, (self.schema_name, table_name))
 
         foreign_keys = []
         for row in results:
