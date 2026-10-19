@@ -26,3 +26,8 @@ export function saveQuery(entry) {
 export function deleteSaved(id) {
   return writeList(STORAGE_KEY, getSaved().filter((entry) => entry.id !== id));
 }
+
+/** Forget this browser's saved queries (after they were moved into the account). */
+export function clearSaved() {
+  localStorage.removeItem(STORAGE_KEY);
+}

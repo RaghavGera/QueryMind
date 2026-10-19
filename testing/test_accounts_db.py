@@ -81,3 +81,63 @@ def test_clarification_tickets_are_single_use_and_bound_to_their_caller(store, d
         late = s.issue_ticket(f"{tag}:anon")
         conn.execute("UPDATE querymind_meta.clarification_tickets SET expires_at = now() - interval '1 second' WHERE subject = %s AND used_at IS NULL", (f"{tag}:anon",))
     assert not s.redeem_ticket(late, f"{tag}:anon"), "expired"
+
+
+def _entry(i, question=None, resolved=None, minute=None):
+    return {
+        "id": f"q-{i}", "question": question or f"Question {i}", "resolved": resolved,
+        "executedAt": f"2026-10-19T10:{(i if minute is None else minute) % 60:02d}:00Z",
+        "savedAt": f"2026-10-19T11:{i % 60:02d}:00Z",
+        "snapshot": {"sql": "SELECT 1", "params": [5], "columns": ["n"], "rows": [{"n": 1.5}], "totalRows": 1, "warnings": []},
+    }
+
+
+def test_history_round_trips_and_keeps_the_newest(store):
+    from app.accounts import HISTORY_LIMIT
+    s, tag = store
+    user = s.upsert_google_user(f"{tag}-sub", "ada@example.com", None, None)
+    for i in range(HISTORY_LIMIT + 3):
+        s.add_history(user.id, _entry(i))
+    s.add_history(user.id, _entry(HISTORY_LIMIT + 2))  # same id again: no duplicate
+    history = s.history(user.id)
+    assert len(history) == HISTORY_LIMIT
+    assert history[0]["id"] == f"q-{HISTORY_LIMIT + 2}" and history[-1]["id"] == "q-3"
+    assert history[0]["snapshot"] == _entry(0)["snapshot"], "JSON comes back exactly as stored"
+    s.delete_history(user.id, history[0]["id"])
+    assert len(s.history(user.id)) == HISTORY_LIMIT - 1
+
+
+def test_saved_queries_replace_by_question_and_clarification(store):
+    s, tag = store
+    user = s.upsert_google_user(f"{tag}-sub", "ada@example.com", None, None)
+    other = s.upsert_google_user(f"{tag}-sub2", "bob@example.com", None, None)
+    assert s.save_query(user.id, _entry(1, "Top products"))
+    assert s.save_query(user.id, _entry(2, "Top products"))
+    assert s.save_query(user.id, _entry(3, "Top products", resolved="by revenue"))
+    assert s.save_query(other.id, _entry(1, "Top products")), "the same id in another account is separate"
+    assert sorted(e["id"] for e in s.saved(user.id)) == ["q-2", "q-3"]
+    assert [e["id"] for e in s.saved(other.id)] == ["q-1"]
+    s.delete_saved(user.id, "q-3")
+    assert [e["id"] for e in s.saved(user.id)] == ["q-2"]
+
+
+def test_saved_limit_leaves_the_list_unchanged(store, monkeypatch):
+    import app.accounts as accounts
+    monkeypatch.setattr(accounts, "SAVED_LIMIT", 2)
+    s, tag = store
+    user = s.upsert_google_user(f"{tag}-sub", "ada@example.com", None, None)
+    assert s.save_query(user.id, _entry(1)) and s.save_query(user.id, _entry(2))
+    assert not s.save_query(user.id, _entry(3))
+    assert s.save_query(user.id, _entry(4, "Question 1")), "replacing an existing one still works at the limit"
+    assert sorted(e["id"] for e in s.saved(user.id)) == ["q-2", "q-4"]
+
+
+def test_import_skips_what_the_account_already_has(store):
+    s, tag = store
+    user = s.upsert_google_user(f"{tag}-sub", "ada@example.com", None, None)
+    s.add_history(user.id, _entry(1))
+    s.save_query(user.id, _entry(5, "Already saved"))
+    added = s.import_entries(user.id, [_entry(1), _entry(2)], [_entry(6, "Already saved"), _entry(7, "New")])
+    assert added == {"history": 1, "saved": 1}
+    assert [e["id"] for e in s.history(user.id)] == ["q-2", "q-1"]
+    assert sorted(e["id"] for e in s.saved(user.id)) == ["q-5", "q-7"]

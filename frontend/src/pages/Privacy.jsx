@@ -8,12 +8,14 @@ const SECTIONS = [
     body: [
       "Your Google account ID, email address, name and profile picture URL, which Google shares when you choose “Sign in with Google”. We never see your Google password.",
       "A session record (when it was created and when it expires) so you stay signed in for up to 7 days, and a count of how many questions you asked each day (to enforce the daily limit).",
+      "Your query history (your last 50 questions) and saved queries, so they follow you to every device: each question, your answer to any clarification, the generated SQL and a copy of up to 200 result rows. When you sign in, the history and saved queries kept in that browser are moved into your account and removed from the browser. You can delete any entry on the History and Saved pages.",
     ],
   },
   {
     title: "If you are not signed in",
     body: [
       "To count the free questions of signed-out visitors we store a keyed hash of your IP address together with a daily count. The IP address itself is not stored by QueryMind.",
+      "Your query history and saved queries stay in your browser's local storage; they are not sent to our server unless you sign in.",
     ],
   },
   {

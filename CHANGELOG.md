@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **History and saved queries in the account.** Signed in, they're stored in Neon
+  (`querymind_meta.query_history`, `saved_queries`) and follow you to every device; signed out
+  they stay in the browser. On sign-in the browser's entries are moved into the account
+  (`POST /me/import`, skipping ones it already has) and cleared locally; a failed import is
+  retried next time. Endpoints `GET/POST/DELETE /me/history`, `GET/PUT/DELETE /me/saved`:
+  newest 50 history entries kept, up to 100 saved queries, re-saving a question replaces it,
+  entries checked (question required, at most 200 rows) and bodies over 8 MB refused. Reopen,
+  Re-run and the Save toggle work as before. The Privacy page says what is stored.
 - **Accounts: Sign in with Google.** `POST /auth/google` takes a Google access token (checked
   with Google: issued to this app's client id, same account, verified email) or an ID token
   (signature against Google's keys, audience, issuer, expiry, `email_verified`) and returns a
@@ -145,6 +153,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- **Deleting no longer loops.** "Delete all customers" asked "Are you sure you want to delete ALL
+  rows?" again after every "yes", although deletes are refused anyway. Delete requests are now
+  refused at once ("Deleting data through natural language is not supported."), before the
+  ambiguity check.
+- **Readable charts.** Date axes read "Jun 2025" (or "2025", "3 Jun 2025") instead of raw
+  timestamps like `2025-06-01T00:00:00+05:30`, taken from the date as written so no viewer's
+  timezone shifts it; the y-axis uses compact numbers ("280K") and is no longer clipped; long
+  series skip labels instead of overlapping; tooltips show the full value ("264,713").
+- Favicon: the QueryMind mark replaces Vite's default; `apple-touch-icon.png` and a 512 px logo added.
 - The SQL panel showed `%s` placeholders and hid the values (e.g. the dates "last month" resolved
   to). It now shows the bound values inline and copies runnable SQL; the server still sends them as
   parameters. Long first lines no longer squeeze the line-number column.

@@ -3,6 +3,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts";
 import { humanizeColumn } from "../../lib/sqlDisplay";
+import { compactNumber, dateLabeler, fullNumber } from "../../lib/chartFormat";
 
 export default function ResultsChart({ columns, rows, kind = "bar" }) {
   const numericCols = columns.filter((c) => typeof rows[0]?.[c] === "number");
@@ -11,6 +12,10 @@ export default function ResultsChart({ columns, rows, kind = "bar" }) {
   const yKey = numericCols[numericCols.length - 1] ?? columns[columns.length - 1];
 
   const ChartComp = kind === "line" ? LineChart : BarChart;
+  // Dates read "Jun 2025", not "2025-06-01T00:00:00+05:30".
+  const xLabel = dateLabeler(rows.map((row) => row[xKey])) ?? undefined;
+  // Long series skip labels instead of overlapping them.
+  const crowded = rows.length > 12;
 
   return (
     <div className="surface-card h-64 w-full p-3 sm:h-72 sm:p-4">
@@ -27,16 +32,25 @@ export default function ResultsChart({ columns, rows, kind = "bar" }) {
             dataKey={xKey}
             tick={{ fill: "#a3a3b3", fontSize: 11 }}
             axisLine={{ stroke: "rgba(255,255,255,0.1)" }}
-            interval={0}
+            tickFormatter={xLabel}
+            interval={crowded ? "preserveStartEnd" : 0}
+            minTickGap={8}
             angle={rows.length > 6 ? -20 : 0}
             textAnchor={rows.length > 6 ? "end" : "middle"}
             height={rows.length > 6 ? 46 : 26}
           />
-          <YAxis tick={{ fill: "#a3a3b3", fontSize: 11 }} axisLine={{ stroke: "rgba(255,255,255,0.1)" }} width={44} />
+          <YAxis
+            tick={{ fill: "#a3a3b3", fontSize: 11 }}
+            axisLine={{ stroke: "rgba(255,255,255,0.1)" }}
+            tickFormatter={compactNumber}
+            width={48}
+          />
           <Tooltip
             contentStyle={{ background: "#14141f", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, fontSize: 12 }}
             labelStyle={{ color: "#f4f4f7" }}
             cursor={{ fill: "rgba(255,255,255,0.04)" }}
+            labelFormatter={xLabel}
+            formatter={fullNumber}
           />
           {kind === "line" ? (
             <Line type="monotone" dataKey={yKey} name={humanizeColumn(yKey)} stroke="#5eead4" strokeWidth={2} dot={{ r: 3, fill: "#5eead4" }} animationDuration={800} />

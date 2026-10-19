@@ -1,6 +1,6 @@
 # QueryMind: accounts and bring your own database (plan)
 
-> **Status (2026-10-18): Phase 1 done and verified live; Phase 2 next.** The decisions below were made by the owner. Work goes phase by phase; each phase ends with tests, a live check, and a commit message for the owner.
+> **Status (2026-10-19): Phase 1 done and verified live; Phase 2 built and tested locally (live check after the owner's push); Phase 3 next.** The decisions below were made by the owner. Work goes phase by phase; each phase ends with tests, a live check, and a commit message for the owner.
 
 ## Decisions
 
@@ -65,6 +65,9 @@ Never paste these values into chat; use the dashboards' environment screens.
 6. **Security headers:** a Content-Security-Policy in `frontend/vercel.json` that allows only our scripts plus Google's sign-in, and a Privacy page.
 
 ### Phase 2: history and saved queries in the account
+
+> Built 2026-10-19 as planned. Signed-out visitors keep using browser storage; the import also runs on any later sign-in that finds browser entries, and a failed import is retried. Limits: newest 50 history entries, 100 saved queries, 200 rows per stored result, 8 MB per request. Checked in a browser: signed-out entries moved into the account and cleared locally, Reopen without a new query, Save toggle, a second device sees the same lists, sign-out shows empty browser lists.
+
 7. Add `query_history` and `saved_queries` tables keyed by user, storing the same snapshot shape as today: SQL, params, warnings, up to 200 rows.
 8. Add CRUD endpoints. The frontend `historyApi` / `savedApi` switch to them, with the same UI behaviour: Reopen without re-running, Re-run prefill, Save toggle.
 9. On first sign-in, import the browser's existing history and saved queries, then clear them locally.

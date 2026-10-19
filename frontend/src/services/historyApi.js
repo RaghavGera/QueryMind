@@ -26,3 +26,8 @@ export async function addHistoryEntry(entry) {
 export async function deleteHistoryEntry(id) {
   return writeList(STORAGE_KEY, load().filter((entry) => entry.id !== id));
 }
+
+/** Forget this browser's history (after it was moved into the account). */
+export function clearHistory() {
+  localStorage.removeItem(STORAGE_KEY);
+}

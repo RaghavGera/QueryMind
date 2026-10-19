@@ -98,7 +98,7 @@ Design decisions that matter in production:
 The frontend, in `frontend/`, has two parts.
 
 - **The public site** is a scroll-driven experience. A WebGL starfield sits behind pinned, scroll-scrubbed scenes that walk through the pipeline: the question, the schema it maps onto, the ambiguity it catches, the SQL it generates and the answer it returns. The site also has a live console wired to the real API. Every SQL snippet, clarification and number on these pages is a real capture from the generator and the demo database. Visitors who prefer reduced motion, or whose browsers lack WebGL, get static and fully readable versions.
-- **The app** (`/app`) is where you work: ask questions, answer clarifications, inspect the SQL, and switch between table and chart views. It also keeps a query history and saved queries, both of which reopen stored results without re-running them, plus a live schema browser and settings. Motion there stays out of the way: results appear as soon as the backend answers.
+- **The app** (`/app`) is where you work: ask questions, answer clarifications, inspect the SQL, and switch between table and chart views. It also keeps a query history and saved queries (in your account when signed in, so they follow you across devices), both of which reopen stored results without re-running them, plus a live schema browser and settings. Motion there stays out of the way: results appear as soon as the backend answers.
 
 Signed-out visitors get 3 free questions a day, in the app or the landing console; signing in with Google raises that to 20. A question and the answer to its clarification count once. The limits keep the AI quota from being drained anonymously.
 
@@ -196,6 +196,7 @@ docs/                 known issues and phase documentation
 | `GET /health` | Database connectivity, and whether writes are enabled |
 | `POST /auth/google` | Exchange a Google access token (or ID token) for a session token |
 | `GET /auth/me`, `GET /auth/usage`, `POST /auth/logout` | The signed-in user, today's question count, sign-out |
+| `/me/history`, `/me/saved`, `POST /me/import` | The signed-in user's query history and saved queries |
 
 `POST /query` and `/query/confirm` need `Authorization: Bearer <session token>`. Without one, a caller gets the anonymous daily allowance, and `/query/confirm` is refused.
 

@@ -446,3 +446,19 @@ def test_filtered_delete_is_never_executed(monkeypatch):
     assert body["status"] == "blocked"
     assert body["sql"] is None
     assert db.writes == []
+
+
+@pytest.mark.parametrize("question, conditions", [
+    ("Delete all customers.", []),  # used to ask "delete ALL rows?" again after every "yes"
+    ("Delete the cancelled orders.", [{"column": "status", "operator": "=", "value": "Cancelled", "table": "orders"}]),
+])
+def test_deletes_are_refused_at_once_without_a_confirmation_loop(monkeypatch, question, conditions):
+    db = _WriteDB(matching_rows=1)
+    table = "orders" if conditions else "customers"
+    intent = QueryIntent(query_type="delete", tables=[table], conditions=conditions)
+    for clarification in (None, "Yes, delete all rows"):
+        code, body = _ask(monkeypatch, db, intent, question, clarification_context=clarification)
+        assert code == 200 and body["status"] == "blocked"
+        assert body["error_message"] == "Deleting data through natural language is not supported."
+        assert body["clarification_questions"] == [] and body["sql"] is None
+    assert db.writes == []

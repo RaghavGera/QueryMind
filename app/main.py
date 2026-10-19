@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 import os
 
-from app.accounts import AccountStore, next_reset
+from app.accounts import SAVED_LIMIT, AccountStore, clean_entry, next_reset
 from app.ambiguity_detector import AmbiguityDetector
 from app.auth import (
     AuthError,
@@ -214,6 +214,19 @@ async def usage_limits(request: Request, call_next):
     return response
 
 
+MAX_ACCOUNT_BODY_BYTES = 8_000_000  # an import of 50 + 100 entries with results is far smaller
+
+
+@app.middleware("http")
+async def account_body_limit(request: Request, call_next):
+    """History and saved queries are stored as sent, so refuse oversized bodies before reading them."""
+    if request.url.path.startswith("/me/") and request.method in ("POST", "PUT"):
+        length = request.headers.get("content-length")
+        if length is None or not length.isdigit() or int(length) > MAX_ACCOUNT_BODY_BYTES:
+            return JSONResponse(status_code=413, content={"status": "error", "error": "That request is too large to store."})
+    return await call_next(request)
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -330,6 +343,112 @@ def sign_out(authorization: Optional[str] = Header(default=None)):
         return {"status": "signed_out"}  # already signed out: nothing to do
     get_account_store().revoke_session(principal.session_id)
     return {"status": "signed_out"}
+
+
+# --------------------------------------------------------------------------- #
+# Query history and saved queries of the signed-in user
+# --------------------------------------------------------------------------- #
+
+class EntryBody(BaseModel):
+    entry: dict
+
+
+class ImportBody(BaseModel):
+    history: list = []
+    saved: list = []
+
+
+def _signed_in_user_id(authorization: Optional[str]) -> int:
+    return _session_principal(authorization).user.id
+
+
+def _bad_entry() -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={"status": "error", "error": "That entry can't be stored (missing question, or result too large)."},
+    )
+
+
+@app.get("/me/history")
+def list_history(authorization: Optional[str] = Header(default=None)):
+    try:
+        user_id = _signed_in_user_id(authorization)
+    except AuthError as exc:
+        return _auth_error(exc)
+    return {"entries": get_account_store().history(user_id)}
+
+
+@app.post("/me/history")
+def add_history(body: EntryBody, authorization: Optional[str] = Header(default=None)):
+    try:
+        user_id = _signed_in_user_id(authorization)
+    except AuthError as exc:
+        return _auth_error(exc)
+    entry = clean_entry(body.entry)
+    if entry is None:
+        return _bad_entry()
+    get_account_store().add_history(user_id, entry)
+    return {"status": "stored"}
+
+
+@app.delete("/me/history/{entry_id}")
+def remove_history(entry_id: str, authorization: Optional[str] = Header(default=None)):
+    try:
+        user_id = _signed_in_user_id(authorization)
+    except AuthError as exc:
+        return _auth_error(exc)
+    get_account_store().delete_history(user_id, entry_id)
+    return {"status": "deleted"}
+
+
+@app.get("/me/saved")
+def list_saved(authorization: Optional[str] = Header(default=None)):
+    try:
+        user_id = _signed_in_user_id(authorization)
+    except AuthError as exc:
+        return _auth_error(exc)
+    return {"entries": get_account_store().saved(user_id)}
+
+
+@app.put("/me/saved")
+def save_entry(body: EntryBody, authorization: Optional[str] = Header(default=None)):
+    try:
+        user_id = _signed_in_user_id(authorization)
+    except AuthError as exc:
+        return _auth_error(exc)
+    entry = clean_entry(body.entry)
+    if entry is None:
+        return _bad_entry()
+    if not get_account_store().save_query(user_id, entry):
+        return JSONResponse(
+            status_code=409,
+            content={"status": "error", "error": f"You have {SAVED_LIMIT} saved queries. Delete one to save another."},
+        )
+    return {"status": "saved"}
+
+
+@app.delete("/me/saved/{entry_id}")
+def remove_saved(entry_id: str, authorization: Optional[str] = Header(default=None)):
+    try:
+        user_id = _signed_in_user_id(authorization)
+    except AuthError as exc:
+        return _auth_error(exc)
+    get_account_store().delete_saved(user_id, entry_id)
+    return {"status": "deleted"}
+
+
+@app.post("/me/import")
+def import_browser_entries(body: ImportBody, authorization: Optional[str] = Header(default=None)):
+    """Move a browser's history and saved queries into the account (invalid entries are skipped)."""
+    try:
+        user_id = _signed_in_user_id(authorization)
+    except AuthError as exc:
+        return _auth_error(exc)
+    history = [e for e in map(clean_entry, body.history) if e is not None]
+    saved = [e for e in map(clean_entry, body.saved) if e is not None]
+    added = get_account_store().import_entries(user_id, history, saved)
+    skipped = len(body.history) + len(body.saved) - len(history) - len(saved)
+    return {"imported": added, "skipped": skipped}
 
 
 def _schema_context(schema: DatabaseSchema) -> dict:
@@ -473,6 +592,20 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
             details=str(exc),
         )
 
+    # Deleting is refused outright. Checked before the ambiguity gate: asking
+    # "delete ALL rows?" about a request that is refused anyway only loops.
+    if structured_intent.query_type == QueryType.DELETE:
+        return {
+            "status": "blocked",
+            "sql": None,
+            "params": [],
+            "warnings": [],
+            "clarification_questions": [],
+            "error_message": "Deleting data through natural language is not supported.",
+            "has_ambiguities": False,
+            "result": {"columns": [], "rows": []},
+        }
+
     generator = SQLGenerator(
         schema,
         AmbiguityDetector(schema),
@@ -496,16 +629,6 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
 
     if succeeded and structured_intent.query_type in (QueryType.INSERT, QueryType.UPDATE):
         return _prepare_write(structured_intent, generated, generator, payload, db, request.allow_writes)
-
-    if succeeded and structured_intent.query_type == QueryType.DELETE:
-        return {
-            **payload,
-            "status": "blocked",
-            "sql": None,
-            "params": [],
-            "error_message": "Deleting data through natural language is not supported.",
-            "result": {"columns": [], "rows": []},
-        }
 
     if succeeded:
         logger.debug("Generated SQL: %s | params: %r", generated.sql, generated.params)

@@ -467,6 +467,30 @@ used or expired ticket, the answer is counted like any question.
 The `querymind_meta` tables are created at startup. The schema reader only reads
 `public`, so the AI never sees them.
 
+## History and saved queries
+
+Signed out, both stay in the browser (localStorage). Signed in, they are stored
+in the account (`querymind_meta.query_history` and `saved_queries`), so they
+follow the user to every device. On sign-in the app moves the browser's entries
+into the account (`POST /me/import`, which skips entries the account already
+has) and then clears them from the browser; if the import fails they stay in
+the browser and the next sign-in retries. Signing out shows that browser's own
+(empty) lists again.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /me/history`, `GET /me/saved` | The account's lists, newest first |
+| `POST /me/history {"entry": ...}` | Add a history entry; only the newest 50 are kept |
+| `PUT /me/saved {"entry": ...}` | Save a query; the same question + clarification replaces the old one; at most 100 (409 beyond) |
+| `DELETE /me/history/{id}`, `DELETE /me/saved/{id}` | Remove one entry |
+| `POST /me/import {"history": [...], "saved": [...]}` | Move a browser's entries in; returns `{"imported": {...}, "skipped": n}` |
+
+All need `Authorization: Bearer <session token>`. An entry is the object the app
+shows: `id`, `question`, `resolved` (the clarification answer), timings, and a
+`snapshot` with the SQL, parameters, warnings and at most 200 result rows. The
+server checks those limits (422 otherwise) and refuses request bodies over 8 MB
+(413) before reading them.
+
 **Google Cloud setup:** OAuth consent screen (app name, support email, the
 `/privacy` page URL), then a **Web application** OAuth client whose *Authorized
 JavaScript origins* list every frontend origin (the Vercel URL,

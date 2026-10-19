@@ -5,9 +5,8 @@ import { useQueryPipeline } from "../hooks/useQueryPipeline";
 import { useAuth, useUsage } from "../auth/AuthProvider";
 import { OutOfQuestions, TriesLeft } from "../auth/UsageNotice";
 import { usageGate } from "../services/session.js";
-import { addHistoryEntry, getHistoryEntry } from "../services/historyApi";
-import { deleteSaved, getSaved, getSavedEntry, saveQuery } from "../services/savedApi";
-import { makeSnapshot, newId, sameQuery } from "../services/storedQueries";
+import { library, useLibrary } from "../hooks/useLibrary";
+import { makeSnapshot, newId } from "../services/storedQueries";
 import { relativeTime } from "../lib/utils";
 import QueryInput from "../components/query/QueryInput";
 import SuggestionChips from "../components/query/SuggestionChips";
@@ -27,11 +26,9 @@ import {
 export default function Dashboard() {
   const pipeline = useQueryPipeline({
     onComplete: (entry) => {
-      addHistoryEntry({
-        id: newId("q"),
-        executedAt: new Date().toISOString(),
-        ...entry,
-      });
+      library
+        .addHistory({ id: newId("q"), executedAt: new Date().toISOString(), ...entry })
+        .catch(() => setNotice("This answer couldn't be added to your history. It will still show here."));
     },
   });
 
@@ -65,7 +62,7 @@ export default function Dashboard() {
   // A question put in the input by "Re-run"; the user still submits it.
   const [draft, setDraft] = useState("");
   const [notice, setNotice] = useState(null);
-  const [savedList, setSavedList] = useState(getSaved);
+  useLibrary(); // re-render when saved queries change (the Save toggle below)
 
   // Links from Query History / Saved Queries:
   //   ?reopen=<history id>  show the stored result (no backend call)
@@ -75,33 +72,39 @@ export default function Dashboard() {
     const reopenId = searchParams.get("reopen");
     const savedId = searchParams.get("saved");
     const prefill = searchParams.get("q");
-    if (!reopenId && !savedId && prefill === null) return;
+    if (!reopenId && !savedId && prefill === null) return undefined;
 
-    if (reopenId || savedId) {
-      const entry = reopenId ? getHistoryEntry(reopenId) : getSavedEntry(savedId);
-      if (restore(entry, reopenId ? "history" : "saved")) {
-        setNotice(null);
+    let active = true;
+    (async () => {
+      if (reopenId || savedId) {
+        // On a fresh page load the account's lists may still be on their way.
+        await library.ensureLoaded();
+        if (!active) return;
+        const entry = reopenId ? library.findHistory(reopenId) : library.findSaved(savedId);
+        if (restore(entry, reopenId ? "history" : "saved")) {
+          setNotice(null);
+        } else {
+          reset();
+          setDraft(entry?.question || "");
+          setNotice(
+            entry
+              ? "This entry has no stored result, so it was put in the box instead. Press submit to run it."
+              : "That entry no longer exists.",
+          );
+        }
       } else {
         reset();
-        setDraft(entry?.question || "");
-        setNotice(
-          entry
-            ? "This entry has no stored result, so it was put in the box instead. Press submit to run it."
-            : "That entry no longer exists.",
-        );
+        setDraft(prefill);
+        setNotice(null);
       }
-    } else {
-      reset();
-      setDraft(prefill);
-      setNotice(null);
-    }
-    setSearchParams({}, { replace: true });
+      setSearchParams({}, { replace: true });
+    })();
+    return () => {
+      active = false;
+    };
   }, [searchParams, setSearchParams, restore, reset]);
 
-  const savedEntry =
-    status === "done"
-      ? savedList.find((entry) => sameQuery(entry, { question, resolved: selectedChoice })) || null
-      : null;
+  const savedEntry = status === "done" ? library.findSavedQuery({ question, resolved: selectedChoice }) : null;
 
   const submit = (q) => {
     setNotice(null);
@@ -118,14 +121,14 @@ export default function Dashboard() {
   const rerun = () => ask(question, { clarification: selectedChoice });
 
   const toggleSave = () => {
-    if (savedEntry) {
-      setSavedList(deleteSaved(savedEntry.id));
-      return;
-    }
-    const snapshot = makeSnapshot({ sql, params, result, warnings });
-    if (restored) snapshot.totalRows = restored.totalRows; // rows were already capped
-    saveQuery({ question, resolved: selectedChoice, durationMs: executionMs, snapshot });
-    setSavedList(getSaved());
+    const done = savedEntry
+      ? library.removeSaved(savedEntry.id)
+      : (() => {
+          const snapshot = makeSnapshot({ sql, params, result, warnings });
+          if (restored) snapshot.totalRows = restored.totalRows; // rows were already capped
+          return library.save({ question, resolved: selectedChoice, durationMs: executionMs, snapshot });
+        })();
+    done.catch((e) => setNotice(e.message));
   };
 
   const idle = status === "idle";
@@ -195,6 +198,13 @@ export default function Dashboard() {
               </button>
             </div>
           </div>
+
+          {notice && (
+            <p className="flex items-start gap-2 text-sm text-ink-dim">
+              <Info size={16} className="mt-0.5 shrink-0" />
+              {notice}
+            </p>
+          )}
 
           {status === "processing" && (
             <PipelineBeam stages={pipelineStagesInitial} startedAt={startedAt} />

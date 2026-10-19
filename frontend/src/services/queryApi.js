@@ -135,3 +135,34 @@ export async function signOut() {
     setSession(null);
   }
 }
+
+// History and saved queries in the account (see services/library.js) ------ //
+
+export async function fetchHistory() {
+  return (await request("/me/history")).entries;
+}
+
+export function addHistory(entry) {
+  return request("/me/history", { method: "POST", body: JSON.stringify({ entry }) });
+}
+
+export function deleteHistory(id) {
+  return request(`/me/history/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function fetchSaved() {
+  return (await request("/me/saved")).entries;
+}
+
+export function saveEntry(entry) {
+  return request("/me/saved", { method: "PUT", body: JSON.stringify({ entry }) });
+}
+
+export function deleteSavedEntry(id) {
+  return request(`/me/saved/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+/** Move this browser's entries into the account; ones it already has are skipped. */
+export function importEntries({ history, saved }) {
+  return request("/me/import", { method: "POST", body: JSON.stringify({ history, saved }) });
+}

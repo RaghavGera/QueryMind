@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import app.auth as auth
 import app.main as main_module
-from app.accounts import User
+from app.accounts import HISTORY_LIMIT, SAVED_LIMIT, User
 from app.database import get_db
 
 CLIENT_ID = "test-client.apps.googleusercontent.com"
@@ -151,6 +151,7 @@ class FakeStore:
     def __init__(self):
         self.users, self.sessions, self.usage, self.refunds = {}, {}, {}, 0
         self.tickets = {}
+        self.history_rows, self.saved_rows = {}, {}
 
     def upsert_google_user(self, sub, email, name, picture):
         user = self.users.setdefault(sub, User(len(self.users) + 1, email, name, picture))
@@ -197,6 +198,42 @@ class FakeStore:
 
     def restore_ticket(self, ticket):
         self.tickets[ticket]["used"] = False
+
+    # History and saved queries, newest first, with the real store's rules.
+    def history(self, user_id):
+        return list(self.history_rows.get(user_id, []))[:HISTORY_LIMIT]
+
+    def add_history(self, user_id, entry):
+        rows = self.history_rows.setdefault(user_id, [])
+        if all(e["id"] != entry["id"] for e in rows):
+            rows.insert(0, entry)
+        del rows[HISTORY_LIMIT:]
+
+    def delete_history(self, user_id, entry_id):
+        self.history_rows[user_id] = [e for e in self.history_rows.get(user_id, []) if e["id"] != entry_id]
+
+    def saved(self, user_id):
+        return list(self.saved_rows.get(user_id, []))
+
+    def save_query(self, user_id, entry):
+        same = lambda e: e["id"] == entry["id"] or (e["question"], e.get("resolved") or "") == (entry["question"], entry.get("resolved") or "")
+        others = [e for e in self.saved_rows.get(user_id, []) if not same(e)]
+        if len(others) >= SAVED_LIMIT:
+            return False
+        self.saved_rows[user_id] = [entry, *others]
+        return True
+
+    def delete_saved(self, user_id, entry_id):
+        self.saved_rows[user_id] = [e for e in self.saved_rows.get(user_id, []) if e["id"] != entry_id]
+
+    def import_entries(self, user_id, history, saved):
+        before = (len(self.history(user_id)), len(self.saved(user_id)))
+        for entry in reversed(history):
+            self.add_history(user_id, entry)
+        for entry in saved:
+            if all((e["question"], e.get("resolved") or "") != (entry["question"], entry.get("resolved") or "") for e in self.saved(user_id)):
+                self.save_query(user_id, entry)
+        return {"history": len(self.history(user_id)) - before[0], "saved": len(self.saved(user_id)) - before[1]}
 
 
 @pytest.fixture
