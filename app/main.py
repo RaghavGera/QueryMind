@@ -293,21 +293,6 @@ def sign_in_with_google(body: GoogleSignIn):
     }
 
 
-@app.get("/debug/forwarding")
-def forwarding_headers(request: Request):
-    """
-    TEMPORARY: echoes the proxy headers of the caller's own request, to set
-    CLIENT_IP_HEADER / TRUSTED_PROXY_HOPS for the host. Nothing is stored.
-    Remove once the free-question counter is confirmed per visitor.
-    """
-    names = ("x-forwarded-for", "cf-connecting-ip", "true-client-ip", "x-real-ip", "forwarded", "x-envoy-external-address")
-    return {
-        "headers": {name: request.headers.get(name) for name in names if request.headers.get(name)},
-        "peer": request.client.host if request.client else None,
-        "counted_as": _request_ip(request),
-    }
-
-
 @app.get("/auth/me")
 def who_am_i(authorization: Optional[str] = Header(default=None)):
     try:

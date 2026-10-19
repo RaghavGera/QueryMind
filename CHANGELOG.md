@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token popup), an account menu with today's count and sign-out, and a `/privacy` page.
   Signed-out visitors can use `/app` and the landing console with "N free questions left
   today", then get a sign-in prompt; the app's top bar and the navbar show "Sign in".
+- `CLIENT_IP_HEADER`: the visitor's IP for the free-question count comes from a header the proxy
+  sets itself (`True-Client-IP` on Render). Fixes signed-out visitors sharing one counter: behind
+  Render the rightmost `X-Forwarded-For` entry is a Render-internal address, not the visitor.
 - `frontend/vercel.json`: Content-Security-Policy (scripts only from this site and Google's
   sign-in), `Referrer-Policy`, `X-Content-Type-Options`, `Permissions-Policy`.
 - `scripts/migrate_db.py`: copy the database to another PostgreSQL server (check / copy / verify).

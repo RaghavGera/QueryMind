@@ -285,7 +285,8 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | `SESSION_SECRET` | for sign-in | Long random string (`python -c "import secrets; print(secrets.token_urlsafe(48))"`). Signs session tokens and keys the anonymous-visitor hash. Changing it signs everyone out and resets anonymous counts. |
 | `DAILY_QUESTION_LIMIT` | no | Questions per signed-in user per UTC day. Default `20`. |
 | `ANON_DAILY_QUESTION_LIMIT` | no | Free questions per day for signed-out visitors (app and landing console together). Default `3`. |
-| `TRUSTED_PROXY_HOPS` | no | How many proxies append to `X-Forwarded-For` in front of the app; the client IP is read that many entries from the right. Default `1` (Render). Use `0` to ignore the header. |
+| `CLIENT_IP_HEADER` | on Render | A header the proxy in front sets itself, used as the visitor's IP for the free-question count. **On Render set `True-Client-IP`.** Measured 2026-10-18: Render's chain is `client, Cloudflare, Render-internal`, so the rightmost `X-Forwarded-For` entry is a shared internal address; a client-sent `True-Client-IP` is overwritten with the real IP (a forged `CF-Connecting-IP` is rejected by Cloudflare with error 1000). |
+| `TRUSTED_PROXY_HOPS` | no | Fallback when `CLIENT_IP_HEADER` is unset or missing: the client IP is read this many entries from the right of `X-Forwarded-For`. Default `1`, which fails safe (visitors may share a count, but none can forge one). `0` uses the socket peer. |
 | `QUERYMIND_SERVICE_KEY` | no | Long random string. A request with header `X-Service-Key: <value>` skips the daily limits; the eval harness sends it. Leave unset to disable. |
 
 Frontend (Vercel project settings): `VITE_API_BASE_URL` = the backend URL, and

@@ -1,15 +1,15 @@
 # QueryMind: accounts and bring your own database (plan)
 
-> **Status: approved scope, not started (2026-10-18).** The decisions below were made by the owner. Work goes phase by phase; each phase ends with tests, a live check, and a commit message for the owner.
+> **Status (2026-10-18): Phase 1 done and verified live; Phase 2 next.** The decisions below were made by the owner. Work goes phase by phase; each phase ends with tests, a live check, and a commit message for the owner.
 
 ## Decisions
 
 | Topic | Decision |
 |---|---|
-| Accounts | Required for the whole app. **Sign in with Google**, implemented by us: the frontend uses Google Identity Services and FastAPI verifies Google's signed ID token. Users are stored in Neon. |
+| Accounts | **Sign in with Google**, implemented by us. The site's own themed button opens Google's token popup (Google Identity Services); FastAPI checks the access token with Google (issued to our client id, verified email). Users are stored in Neon. *(Changed during Phase 1: the stock Google button was off-theme.)* |
 | Who can sign in | Anyone with a Google account |
 | Session | The API issues its own signed, expiring session token, sent as `Authorization: Bearer`, plus a Content-Security-Policy on the site |
-| Usage limits | **20 questions per user per day** (every `/query` call counts, including clarification answers). Visitors who aren't signed in get **3 free tries per day** in the landing console, then "Sign in with Google to keep going". |
+| Usage limits | **20 questions per user per day.** Visitors who aren't signed in get **3 free questions per day** in the app and the landing console together, then "Sign in with Google to keep going". **A question and its clarification count once** (single-use clarification ticket). *(Both changed during Phase 1 at the owner's request.)* |
 | History and saved queries | Stored per account in Neon and synced across devices. Existing browser entries are imported on first sign-in. |
 | Data sources | Both **file uploads** (CSV / Excel) and **connecting your own PostgreSQL** |
 | Connection credentials | Encrypted on the server (Fernet), deleted after 24 hours |
@@ -23,16 +23,22 @@
    - Authorized JavaScript origins: `https://query-mind-tawny.vercel.app` and `http://localhost:5173`.
    - Set up the OAuth consent screen with scopes `openid`, `email`, `profile`. A privacy-policy link is needed to publish; Phase 1 adds a Privacy page for it.
 2. **Render environment:**
-   - `GOOGLE_CLIENT_ID`;
-   - `SESSION_SECRET`, a long random string that signs session tokens;
+   - `GOOGLE_CLIENT_ID` (done);
+   - `SESSION_SECRET`, a long random string that signs session tokens (done);
+   - `QUERYMIND_SERVICE_KEY`, lets the eval skip the limits (done);
+   - `CLIENT_IP_HEADER=True-Client-IP`, the visitor IP for free questions (done; see SETUP.md for the measurement);
    - `CREDENTIAL_KEY` (Phase 6), the Fernet key that encrypts stored connection URLs.
-3. **Vercel environment:** `VITE_GOOGLE_CLIENT_ID`.
+3. **Vercel environment:** `VITE_GOOGLE_CLIENT_ID` (done).
+4. **Publish the OAuth consent screen** with the `/privacy` URL. Until then only listed test users can sign in.
 
 Never paste these values into chat; use the dashboards' environment screens.
 
 ## Phases and steps
 
-### Phase 1: accounts and usage limits
+### Phase 1: accounts and usage limits (done 2026-10-18)
+
+> Shipped as planned, with three changes the owner asked for: signed-out visitors can use `/app` (not only the landing console), a clarification answer is free (ticket), and a themed button using Google's token popup. Verified live: real Google sign-in, per-visitor free-question counts that can't be forged, security headers, eval 41/41 with the service key.
+
 1. **Tables** in `querymind_meta`, created at startup:
    - `users`: Google subject id, email, name, avatar, created_at, last_login;
    - `sessions`: id, user, expiry, revoked; supports sign-out;
