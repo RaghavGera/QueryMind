@@ -1,13 +1,15 @@
 import { Suspense, useEffect, useState } from "react";
 import { Link, useLocation, useOutlet } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { Menu, RotateCw } from "lucide-react";
+import { Info, Menu, RotateCw, X } from "lucide-react";
 import Sidebar, { ConnectionBadge } from "../navigation/Sidebar";
 import BootScreen from "../ui/BootScreen";
 import { useBackendInfo } from "../../hooks/useBackendInfo";
 import { useAuth } from "../../auth/AuthProvider";
 import { fetchUsage } from "../../services/queryApi";
 import AccountMenu from "../navigation/AccountMenu";
+import WorkspaceSwitcher from "../navigation/WorkspaceSwitcher";
+import { useWorkspaces, workspaces } from "../../hooks/useWorkspaces";
 
 /**
  * The app shell. Same look as the site, but motion stays quick (≤ 200 ms
@@ -16,7 +18,8 @@ import AccountMenu from "../navigation/AccountMenu";
 export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const backend = useBackendInfo();
+  const { activeId, notice } = useWorkspaces();
+  const backend = useBackendInfo(activeId);
   const location = useLocation();
   const outlet = useOutlet();
   const { status } = useAuth();
@@ -46,12 +49,11 @@ export default function AppLayout() {
           <button onClick={() => setMobileOpen(true)} className="btn-ghost !px-1.5 md:hidden" aria-label="Open menu">
             <Menu size={18} />
           </button>
-          <span className="hidden font-mono text-[11px] uppercase tracking-[0.2em] text-ink-faint md:inline">
-            Workspace · <span className="text-ink-dim">{backend.schema?.database || "—"}</span>
-            {backend.schema && <span className="text-ink-faint"> · {backend.schema.tables.length} tables</span>}
-          </span>
+          <WorkspaceSwitcher tables={backend.schema?.tables.length ?? null} />
           <div className="flex items-center gap-3 text-ink-dim">
-            <ConnectionBadge backend={backend} showDatabase={false} />
+            <span className="hidden sm:inline-flex">
+              <ConnectionBadge backend={backend} showDatabase={false} />
+            </span>
             {status === "signedIn" ? (
               <AccountMenu />
             ) : (
@@ -67,6 +69,18 @@ export default function AppLayout() {
             )}
           </div>
         </header>
+
+        {notice && (
+          <div className="flex items-start justify-between gap-3 border-b border-accent-amber/20 bg-accent-amber/10 px-4 py-2 text-sm text-ink sm:px-6">
+            <span className="flex items-start gap-2">
+              <Info size={15} className="mt-0.5 shrink-0 text-accent-amber" />
+              {notice}
+            </span>
+            <button onClick={workspaces.dismissNotice} className="btn-ghost !p-1" aria-label="Dismiss">
+              <X size={14} />
+            </button>
+          </div>
+        )}
 
         <main className="relative flex-1 overflow-y-auto">
           <AnimatePresence mode="wait" initial={false}>

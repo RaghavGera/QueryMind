@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, History as HistoryIcon, Loader2 } from "lucide-react";
 import { library, useLibrary } from "../hooks/useLibrary";
 import { useAuth } from "../auth/AuthProvider";
-import HistoryCard from "../components/history/HistoryCard";
+import EntryList from "../components/history/EntryList";
 import PageHeader from "../components/ui/PageHeader";
 
 export default function HistoryPage() {
@@ -42,25 +41,21 @@ export default function HistoryPage() {
         <div className="flex h-40 items-center justify-center gap-2 text-ink-dim">
           <Loader2 size={16} className="animate-spin" /> Loading history...
         </div>
-      ) : history.length === 0 ? (
-        status === "ready" && (
-          <div className="hud flex flex-col items-center justify-center gap-2 py-16 text-center">
-            <HistoryIcon size={22} className="text-ink-faint" />
-            <p className="text-sm text-ink-dim">No queries yet. Ask something to get started.</p>
-          </div>
-        )
       ) : (
-        <AnimatePresence>
-          {history.map((entry) => (
-            <HistoryCard
-              key={entry.id}
-              entry={entry}
-              onReopen={handleReopen}
-              onRerun={handleRerun}
-              onDelete={handleDelete}
-            />
-          ))}
-        </AnimatePresence>
+        <EntryList
+          entries={history}
+          onReopen={handleReopen}
+          onRerun={handleRerun}
+          onDelete={handleDelete}
+          empty={
+            status === "ready" && (
+              <div className="hud flex flex-col items-center justify-center gap-2 py-16 text-center">
+                <HistoryIcon size={22} className="text-ink-faint" />
+                <p className="text-sm text-ink-dim">No queries yet. Ask something to get started.</p>
+              </div>
+            )
+          }
+        />
       )}
     </div>
   );

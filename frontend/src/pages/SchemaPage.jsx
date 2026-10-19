@@ -1,25 +1,32 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, RotateCw } from "lucide-react";
 import { getSchema } from "../services/schemaApi";
+import { useWorkspaces } from "../hooks/useWorkspaces";
 import SchemaTableCard from "../components/schema/SchemaTableCard";
 import SchemaRelationships from "../components/schema/SchemaRelationships";
 import PageHeader from "../components/ui/PageHeader";
 
-/** The live schema from GET /schema (no mock data, no invented row counts). */
+/** One Schema page per workspace: switching in the top bar loads a fresh one. */
 export default function SchemaPage() {
+  const { activeId } = useWorkspaces();
+  return <WorkspaceSchema key={activeId} activeId={activeId} />;
+}
+
+/** The live schema from GET /schema (no mock data, no invented row counts). */
+function WorkspaceSchema({ activeId }) {
   const [state, setState] = useState({ schema: null, error: null });
   const [attempt, setAttempt] = useState(0);
   const [active, setActive] = useState(null);
 
   useEffect(() => {
     let alive = true;
-    getSchema({ refresh: attempt > 0 })
+    getSchema({ refresh: attempt > 0, workspaceId: activeId })
       .then((schema) => alive && setState({ schema, error: null }))
       .catch((error) => alive && setState({ schema: null, error: error.message }));
     return () => {
       alive = false;
     };
-  }, [attempt]);
+  }, [attempt, activeId]);
 
   const { schema, error } = state;
 

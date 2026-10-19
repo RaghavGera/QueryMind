@@ -323,6 +323,34 @@ _WHICH_SUBJECT = re.compile(
 _NOT_SINGLE = re.compile(r"\b(\d+|each|every|per|all)\b", re.IGNORECASE)
 
 
+def _bare(column: str) -> str:
+    return str(column).replace('"', "").strip().lower()
+
+
+def _order_by_aggregate(order_by: List[OrderBy], aggregations: List[Aggregation], group_by: List[str]) -> List[OrderBy]:
+    """
+    Sorting by a plain column that the query aggregates but doesn't group by is
+    invalid once rows are grouped ("must appear in the GROUP BY clause"). The
+    model sometimes writes it ("smallest budget": MIN(budget) ... ORDER BY
+    budget, seen 2026-10-20); sort by that aggregate instead.
+    """
+    if not order_by or not aggregations:
+        return order_by
+    grouped = {_bare(c) for c in group_by}
+    fixed = []
+    for item in order_by:
+        column = _bare(item.column)
+        if "(" not in column and column not in grouped:
+            same = next(
+                (a for a in aggregations if a.column and "(" not in str(a.column) and _bare(a.column) == column),
+                None,
+            )
+            if same is not None:
+                item = OrderBy(column=f"{same.aggregation_type.value}({same.column})", direction=item.direction)
+        fixed.append(item)
+    return fixed
+
+
 def _single_answer_limit(question: str, order_by: List[OrderBy], limit: Optional[int]) -> Optional[int]:
     """1 when the question asks "which <one thing> ... the most/least", else ``limit`` unchanged."""
     if limit is not None or not order_by or _NOT_SINGLE.search(question) or not _SUPERLATIVE.search(question):
@@ -638,9 +666,14 @@ def convert_query_intent(
     confidence_score: float = 0.0,
     schema: Optional[DatabaseSchema] = None,
     today: Optional[date] = None,
+    demo_rules: bool = True,
 ) -> StructuredIntent:
     """
     Convert a Phase 2 QueryIntent (LLM output) into a Phase 3/4 StructuredIntent.
+
+    ``demo_rules`` turns on the demo store's business rules ("top N" with no
+    metric = units sold; sales = completed orders). They are facts about the
+    demo data, so the user's own workspaces convert without them.
 
     Args:
         query_intent: The loosely-typed intent extracted by `extract_intent`.
@@ -701,6 +734,19 @@ def convert_query_intent(
                 )
             break
 
+    # A plain table.column listed as an "aggregation" (seen 2026-10-20 for
+    # "Which department has the smallest budget?") is a column to select, not a
+    # function. If the rows are grouped it joins the grouping (one value each).
+    bare = [s for s in agg_specs if isinstance(s, str) and _PLAIN_QUALIFIED.fullmatch(s.strip())]
+    if bare:
+        agg_specs = [s for s in agg_specs if s not in bare]
+        for spec in bare:
+            column = spec.strip()
+            if column not in columns:
+                columns.append(column)
+            if query_intent.group_by and column not in query_intent.group_by:
+                query_intent = query_intent.model_copy(update={"group_by": [*query_intent.group_by, column]})
+
     aggregations = []
     if agg_specs:
         aggregations = convert_aggregations(agg_specs, columns)
@@ -729,7 +775,8 @@ def convert_query_intent(
     ranked_by_units_sold = False
     limit = query_intent.limit
     if (
-        schema is not None
+        demo_rules
+        and schema is not None
         and query_intent.group_by
         and query_type in (QueryType.SELECT, QueryType.AGGREGATE)
         and needs_ranking_metric(original_question)
@@ -816,10 +863,12 @@ def convert_query_intent(
             limit = single
             assumptions.append(SINGLE_ANSWER_NOTE)
 
+    order_by = _order_by_aggregate(order_by, aggregations, group_by)
     tables = _referenced_tables(list(query_intent.tables), query_intent, aggregations)
-    _apply_completed_sales_rule(
-        original_question, tables, conditions, aggregations, schema, assumptions, ranked_by_units_sold
-    )
+    if demo_rules:
+        _apply_completed_sales_rule(
+            original_question, tables, conditions, aggregations, schema, assumptions, ranked_by_units_sold
+        )
     joins = _apply_anti_join(_derive_fk_joins(tables, schema), conditions, tables, schema)
 
     try:

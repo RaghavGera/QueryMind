@@ -249,3 +249,79 @@ def test_an_existing_limit_or_no_ordering_is_left_alone(schema):
     question = "Which region generated the most revenue?"
     assert convert_query_intent(_ranked_intent(limit=5), question, schema=schema).limit == 5
     assert convert_query_intent(_ranked_intent(order_by=None), question, schema=schema).limit is None
+
+
+def test_the_demo_business_rules_stay_out_of_the_users_own_data(schema):
+    sales = convert_query_intent(_sales_intent(), "Give me the total sales of last month.", schema=schema, demo_rules=False)
+    assert _status_conditions(sales) == [], "no completed-orders filter outside the demo"
+    assert "Sales count completed orders only" not in " ".join(sales.recognized_entities.get("assumptions", []))
+
+    top = QueryIntent(query_type="aggregate", tables=["products"], columns=["products.product_name"],
+                      group_by=["products.product_name"], limit=10)
+    demo = convert_query_intent(top, "What were our top 10 products?", schema=schema)
+    own = convert_query_intent(top, "What were our top 10 products?", schema=schema, demo_rules=False)
+    assert demo.aggregations, "the demo ranks by units sold"
+    assert own.aggregations == [] and not own.recognized_entities.get("assumptions"), "own data: no guessed metric"
+
+
+def test_the_ranking_question_names_the_users_own_columns(schema):
+    top = QueryIntent(query_type="aggregate", tables=["products"], columns=["products.product_name"],
+                      group_by=["products.product_name"], limit=10)
+    intent = convert_query_intent(top, "What were our top 10 products?", schema=schema, demo_rules=False)
+    own = AmbiguityDetector(schema, demo=False).detect_ambiguities(intent)
+    question = next(a.clarification_question for a in own.ambiguities if a.context.get("kind") == "ranking")
+    assert question == "What should 'top' be ranked by? For example total price, or number of products."
+    demo = AmbiguityDetector(schema).detect_ambiguities(intent)
+    assert "units sold" in next(a.clarification_question for a in demo.ambiguities if a.context.get("kind") == "ranking")
+
+
+def test_sorting_by_an_aggregated_column_sorts_by_its_aggregate(schema):
+    # Seen live 2026-10-20 on uploaded data: "smallest budget" came back as
+    # MIN(budget) ... ORDER BY budget, which Postgres rejects once rows are grouped.
+    intent = QueryIntent(
+        query_type="aggregate", tables=["products"], columns=["products.category"],
+        aggregations=["MIN(products.price)"], group_by=["products.category"],
+        order_by={"column": "products.price", "direction": "asc"}, limit=1,
+    )
+    structured = convert_query_intent(intent, "Which category has the cheapest product?", schema=schema)
+    assert [(o.column, o.direction.value) for o in structured.order_by] == [("MIN(products.price)", "ASC")]
+    result = SQLGenerator(schema, AmbiguityDetector(schema)).generate(structured)
+    assert 'ORDER BY MIN("products"."price") ASC' in result.sql
+
+
+def test_sorting_by_a_grouped_column_is_left_alone(schema):
+    intent = QueryIntent(
+        query_type="aggregate", tables=["products"], columns=["products.category"],
+        aggregations=["COUNT(products.product_id)"], group_by=["products.category"],
+        order_by={"column": "products.category", "direction": "asc"},
+    )
+    structured = convert_query_intent(intent, "How many products are in each category?", schema=schema)
+    assert [o.column for o in structured.order_by] == ["products.category"]
+
+
+def test_a_plain_column_listed_as_an_aggregation_is_selected(schema):
+    # Seen 2026-10-20: "smallest budget" as aggregations ["departments.budget"].
+    intent = QueryIntent(
+        query_type="aggregate", tables=["products"], columns=["products.product_name"],
+        aggregations=["products.price"], order_by={"column": "products.price", "direction": "asc"}, limit=1,
+    )
+    structured = convert_query_intent(intent, "Which product has the lowest price?", schema=schema)
+    assert structured.aggregations == []
+    assert "products.price" in structured.columns
+    result = SQLGenerator(schema, AmbiguityDetector(schema)).generate(structured)
+    assert result.status == GenerationStatus.SUCCESS, result.error_message
+    assert 'ORDER BY "products"."price" ASC' in result.sql and "LIMIT 1" in result.sql
+
+
+def test_one_and_zero_mean_true_and_false_for_a_yes_no_column(schema):
+    from app.models import Condition, ConditionOperator
+    from app.sql_generator import SQLGenerator as Generator
+    from app.schema import ColumnInfo
+    schema.tables["customers"].columns["vip"] = ColumnInfo(name="vip", data_type="boolean", is_nullable=True)
+    generator = Generator(schema, AmbiguityDetector(schema))
+    frag, params = generator._render_condition(
+        Condition(column="vip", operator=ConditionOperator.EQUALS, value=1, table="customers"), ["customers"])
+    assert params == [True] and "LOWER" not in frag
+    frag, params = generator._render_condition(
+        Condition(column="vip", operator=ConditionOperator.IN, value=[0, 1], table="customers"), ["customers"])
+    assert params == [False, True]

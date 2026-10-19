@@ -58,7 +58,7 @@ export default function AccountMenu() {
       <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-2.5 rounded-full py-1 pl-1 pr-3 transition-colors hover:bg-white/[0.05]" aria-haspopup="menu" aria-expanded={open}>
         <Avatar user={user} />
         {limit != null && (
-          <span className={cn("font-mono text-[11px] tabular-nums", nearLimit ? "text-accent-amber" : "text-ink-dim")} title="Questions asked today (resets 00:00 UTC)">
+          <span className={cn("whitespace-nowrap font-mono text-[11px] tabular-nums", nearLimit ? "text-accent-amber" : "text-ink-dim")} title="Questions asked today (resets 00:00 UTC)">
             {used} / {limit}
           </span>
         )}

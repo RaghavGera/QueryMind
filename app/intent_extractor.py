@@ -308,6 +308,79 @@ Q: Show monthly revenue
 {"query_type": "aggregate", "tables": ["orders", "order_items"], "columns": ["DATE_TRUNC('month', orders.order_date)"], "aggregations": ["SUM(order_items.quantity * order_items.unit_price)"], "group_by": ["DATE_TRUNC('month', orders.order_date)"], "order_by": {"column": "DATE_TRUNC('month', orders.order_date)", "direction": "asc"}}
 """
 
+# --------------------------------------------------------------------------- #
+# The same prompt for the user's own data (an uploaded or connected workspace).
+# Its examples use a made-up sample schema, never the demo's tables, and it has
+# none of the demo's business rules ("top N" = units sold, revenue from
+# order_items): on other data those would be guesses, and QueryMind asks instead.
+# --------------------------------------------------------------------------- #
+
+SYSTEM_PROMPT_OWN = """You extract structured query intent from a natural-language question about the user's own database, using the schema provided. Use only tables and columns that appear in that schema, qualified as table.column. The examples below use a made-up sample schema, stores(store_id, city) and sales(sale_id, store_id, sold_on, amount); never use those names unless they are in the provided schema.
+
+Rules:
+- Dates: resolve relative phrases ("last month", "this quarter") to ISO dates (YYYY-MM-DD) from the current date given. BETWEEN takes a list of exactly two values, e.g. ["2026-08-01", "2026-08-31"]. Never pass a relative phrase as a value.
+- A concept with no matching column: use the closest real column; never invent one.
+- Metrics are arithmetic over real numeric columns, e.g. "SUM(sales.amount)".
+- Whenever you set group_by you MUST also set aggregations. Put only non-aggregated dimension columns in "columns".
+- "top N <things>" or "best <things>" that names no metric: use a metric only if exactly one numeric column obviously measures it; otherwise leave aggregations, group_by and order_by empty and QueryMind will ask the user.
+
+Examples (arguments only):
+Q: Which city had the most sales?
+{"query_type": "aggregate", "tables": ["stores", "sales"], "columns": ["stores.city"], "aggregations": ["SUM(sales.amount)"], "group_by": ["stores.city"], "order_by": {"column": "SUM(sales.amount)", "direction": "desc"}, "limit": 1}
+Q: How many sales were there in each city?
+{"query_type": "aggregate", "tables": ["stores", "sales"], "columns": ["stores.city"], "aggregations": ["COUNT(sales.sale_id)"], "group_by": ["stores.city"]}"""
+
+HAVING_GUIDANCE_OWN = """
+A condition on an aggregate ("more than 100 sales", "over 5,000 in total") goes in "conditions" with the aggregate expression as the column, plus the matching group_by:
+Q: Which stores had more than 100 sales?
+{"query_type": "aggregate", "tables": ["stores", "sales"], "columns": ["stores.city"], "aggregations": ["COUNT(sales.sale_id)"], "group_by": ["stores.store_id", "stores.city"], "conditions": [{"column": "COUNT(sales.sale_id)", "operator": ">", "value": 100}]}
+"""
+
+WRITE_GUIDANCE_OWN = """
+Writes (insert / update):
+- "add / create / insert a new <row>" -> query_type "insert", tables [the one table], values {bare column: value} using ONLY values the user stated. Never invent values; omit anything not stated.
+- "change / update / set / rename ..." -> query_type "update", tables [the one table], values {column: new value}, and conditions that identify exactly which rows to change.
+- "delete / remove" -> query_type "delete" with conditions identifying the rows.
+Q: Change the amount of sale 7 to 250
+{"query_type": "update", "tables": ["sales"], "values": {"amount": 250}, "conditions": [{"column": "sale_id", "operator": "=", "value": 7, "table": "sales"}]}
+"""
+
+COMPARISON_GUIDANCE_OWN = """
+Period comparison ("increased / decreased / grew / dropped this quarter|month|year", "compared to last month"):
+- Set "comparison" to {"date_column": "<table.column>", "grain": "month|quarter|year", "direction": "increase|decrease|change", "period": "this|last"}. Do NOT compute dates yourself.
+- Put the metric in "aggregations" (exactly one), the entities being compared in "columns" and "group_by". Do not add date conditions for the compared periods.
+Q: Show stores whose sales increased this quarter
+{"query_type": "aggregate", "tables": ["stores", "sales"], "columns": ["stores.store_id", "stores.city"], "aggregations": ["SUM(sales.amount)"], "group_by": ["stores.store_id", "stores.city"], "comparison": {"date_column": "sales.sold_on", "grain": "quarter", "direction": "increase", "period": "this"}}
+"""
+
+PER_GROUP_GUIDANCE_OWN = """
+Top N per group ("top 3 stores by sales in each city"):
+- Set "top_n_per_group" to {"partition_by": ["<table.column of the group>"], "n": N}, with the metric in "aggregations", the entity in "columns" and "group_by", and "order_by" on the metric (descending). Do not set "limit".
+Q: What were the top 3 stores by sales in each city?
+{"query_type": "aggregate", "tables": ["stores", "sales"], "columns": ["stores.city", "stores.store_id"], "aggregations": ["SUM(sales.amount)"], "group_by": ["stores.city", "stores.store_id"], "order_by": {"column": "SUM(sales.amount)", "direction": "desc"}, "top_n_per_group": {"partition_by": ["stores.city"], "n": 3}}
+"""
+
+NESTED_GUIDANCE_OWN = """
+Average/maximum of a per-entity total ("average sales per store"):
+- Nest the aggregates: aggregations ["AVG(SUM(<expr>))"] and group_by the entity the inner total is computed for.
+Q: What is the average sales total per store?
+{"query_type": "aggregate", "tables": ["sales"], "aggregations": ["AVG(SUM(sales.amount))"], "group_by": ["sales.store_id"]}
+"""
+
+TIME_GROUPING_GUIDANCE_OWN = """
+Time grouping ("monthly sales", "rows per month"):
+- Use DATE_TRUNC('<day|week|month|quarter|year>', <table.column>) as a column AND in group_by. Never use strftime, MONTH(), EXTRACT or to_char.
+Q: Show monthly sales
+{"query_type": "aggregate", "tables": ["sales"], "columns": ["DATE_TRUNC('month', sales.sold_on)"], "aggregations": ["SUM(sales.amount)"], "group_by": ["DATE_TRUNC('month', sales.sold_on)"], "order_by": {"column": "DATE_TRUNC('month', sales.sold_on)", "direction": "asc"}}
+"""
+
+_PROMPTS = {
+    "demo": (SYSTEM_PROMPT, HAVING_GUIDANCE, WRITE_GUIDANCE, COMPARISON_GUIDANCE, PER_GROUP_GUIDANCE,
+             NESTED_GUIDANCE, TIME_GROUPING_GUIDANCE),
+    "own": (SYSTEM_PROMPT_OWN, HAVING_GUIDANCE_OWN, WRITE_GUIDANCE_OWN, COMPARISON_GUIDANCE_OWN,
+            PER_GROUP_GUIDANCE_OWN, NESTED_GUIDANCE_OWN, TIME_GROUPING_GUIDANCE_OWN),
+}
+
 _WRITE_WORDS = re.compile(r"\b(add|insert|create|update|change|set|rename|delete|remove)\b", re.IGNORECASE)
 _COMPARISON_WORDS = re.compile(
     r"\b(increased?|decreased?|grew|grown|growth|dropped|declined?|rose|fell|compared|versus|vs)\b",
@@ -329,21 +402,25 @@ _HAVING_WORDS = re.compile(
 )
 
 
-def build_system_prompt(question: str) -> str:
-    """The base prompt plus whichever optional guidance this question needs."""
-    prompt = SYSTEM_PROMPT
+def build_system_prompt(question: str, dataset: str = "demo") -> str:
+    """
+    The base prompt plus whichever optional guidance this question needs.
+    ``dataset`` is "demo" (the sample store) or "own" (the user's workspace).
+    """
+    base, having, write, comparison, per_group, nested, time_grouping = _PROMPTS.get(dataset, _PROMPTS["demo"])
+    prompt = base
     if _HAVING_WORDS.search(question):
-        prompt += "\n" + HAVING_GUIDANCE
+        prompt += "\n" + having
     if _WRITE_WORDS.search(question):
-        prompt += "\n" + WRITE_GUIDANCE
+        prompt += "\n" + write
     if _COMPARISON_WORDS.search(question):
-        prompt += "\n" + COMPARISON_GUIDANCE
+        prompt += "\n" + comparison
     if _PER_GROUP_WORDS.search(question) and _RANKING_WORDS.search(question):
-        prompt += "\n" + PER_GROUP_GUIDANCE
+        prompt += "\n" + per_group
     if _NESTED_WORDS.search(question):
-        prompt += "\n" + NESTED_GUIDANCE
+        prompt += "\n" + nested
     if _TIME_GROUP_WORDS.search(question):
-        prompt += "\n" + TIME_GROUPING_GUIDANCE
+        prompt += "\n" + time_grouping
     return prompt
 
 
@@ -446,7 +523,7 @@ Current date: {date.today().isoformat()}
 User Question: {question}"""
     return {
         "messages": [
-            {"role": "system", "content": build_system_prompt(question)},
+            {"role": "system", "content": build_system_prompt(question, schema_context.get("dataset", "demo"))},
             {"role": "user", "content": user_prompt},
         ],
         "tools": [{"type": "function", "function": build_function_schema(question)}],

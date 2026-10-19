@@ -199,6 +199,7 @@ docs/                 known issues and phase documentation
 | `GET /auth/me`, `GET /auth/usage`, `POST /auth/logout` | The signed-in user, today's question count, sign-out |
 | `/me/history`, `/me/saved`, `POST /me/import` | The signed-in user's query history and saved queries |
 | `GET /workspaces`, `DELETE /workspaces/{id}` | The demo plus your own workspace; `workspace_id` on `/query` and `/schema` picks one |
+| `POST /workspaces/uploads/preview`, `POST /workspaces/uploads` | Analyse CSV/Excel files (editable plan), then import them as your workspace |
 
 `POST /query` and `/query/confirm` need `Authorization: Bearer <session token>`. Without one, a caller gets the anonymous daily allowance, and `/query/confirm` is refused.
 
@@ -229,10 +230,11 @@ Full details are in [SETUP.md](SETUP.md#request-options-for-post-query).
 - the web app;
 - Google sign-in with daily question limits;
 - history and saved queries in the account;
-- read-only transactions, query timeouts and row caps.
+- read-only transactions, query timeouts and row caps;
+- upload your own CSV/Excel data, with an editable preview and a private, read-only workspace.
 
 **Next:** product hardening.
-- bring your own data: CSV/XLSX uploads and read-only PostgreSQL connections;
+- connect your own PostgreSQL (read-only);
 - API keys for programmatic access;
 - a query audit log with usage analytics;
 - plain-English explanations of generated SQL;

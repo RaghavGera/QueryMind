@@ -1,6 +1,6 @@
 import { Link, NavLink } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { MessageSquare, Database, History, Bookmark, Settings, ChevronsLeft, ChevronsRight, X } from "lucide-react";
+import { MessageSquare, Database, History, Bookmark, Settings, ChevronsLeft, ChevronsRight, X, Upload } from "lucide-react";
 import { cn } from "../../lib/utils";
 import Logo from "../ui/Logo";
 import { StatusDot } from "../ui/Surfaces";
@@ -10,6 +10,7 @@ const items = [
   { to: "/app/schema", label: "Schema", icon: Database },
   { to: "/app/history", label: "Query History", icon: History },
   { to: "/app/saved", label: "Saved Queries", icon: Bookmark },
+  { to: "/app/connect", label: "Your Data", icon: Upload },
   { to: "/app/settings", label: "Settings", icon: Settings },
 ];
 

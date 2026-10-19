@@ -20,6 +20,7 @@ const SchemaPage = lazy(() => import("./pages/SchemaPage"));
 const HistoryPage = lazy(() => import("./pages/HistoryPage"));
 const SavedPage = lazy(() => import("./pages/SavedPage"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const ConnectPage = lazy(() => import("./pages/ConnectPage"));
 
 export default function App() {
   return (
@@ -41,6 +42,7 @@ export default function App() {
             <Route path="schema" element={<SchemaPage />} />
             <Route path="history" element={<HistoryPage />} />
             <Route path="saved" element={<SavedPage />} />
+            <Route path="connect" element={<ConnectPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>

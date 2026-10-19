@@ -137,14 +137,37 @@ class AmbiguityDetector:
         ...         print(ambiguity.clarification_question)
     """
 
-    def __init__(self, schema: DatabaseSchema):
+    def __init__(self, schema: DatabaseSchema, demo: bool = True):
         """
         Initialize the ambiguity detector.
 
         Args:
             schema: Database schema for validation
+            demo: The demo store (its clarification examples name its metrics);
+                False for the user's own data, whose examples come from its schema
         """
         self.schema = schema
+        self.demo = demo
+
+    _NUMERIC_TYPES = ("integer", "bigint", "smallint", "numeric", "decimal", "real", "double precision")
+
+    def _ranking_examples(self, intent: StructuredIntent) -> str:
+        """Example metrics for "rank by what?": the demo's, or the user's own number columns."""
+        if self.demo:
+            return "total spending, number of orders, or units sold"
+        examples = []
+        names = [t for t in intent.tables if t in self.schema.tables] or list(self.schema.tables)
+        for table_name in names:
+            table = self.schema.tables[table_name]
+            for column in table.columns.values():
+                is_key = column.is_primary_key or column.name.endswith("_id") or column.name == "id"
+                if not is_key and column.data_type in self._NUMERIC_TYPES:
+                    examples.append(f"total {column.name.replace('_', ' ')}")
+            examples.append(f"number of {table_name.replace('_', ' ')}")
+        examples = list(dict.fromkeys(examples))[:3]
+        if len(examples) == 1:
+            return examples[0]
+        return ", ".join(examples[:-1]) + f", or {examples[-1]}"
 
     def detect_ambiguities(self, intent: StructuredIntent) -> AmbiguityDetectionResult:
         """
@@ -459,10 +482,7 @@ class AmbiguityDetector:
                 ambiguity_type=AmbiguityType.VAGUE_TERM,
                 severity=SeverityLevel.HIGH,
                 description=f"'{term}' does not say what to rank by",
-                clarification_question=(
-                    f"What should '{term}' be ranked by? For example total "
-                    "spending, number of orders, or units sold."
-                ),
+                clarification_question=f"What should '{term}' be ranked by? For example {self._ranking_examples(intent)}.",
                 context={"term": term, "kind": "ranking"},
             ))
 

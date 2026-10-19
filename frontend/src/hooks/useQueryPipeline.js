@@ -18,7 +18,7 @@ async function timed(promise) {
  * Results appear as soon as the backend answers. There is no scripted
  * "stage" animation: `startedAt` lets the UI show a real elapsed timer.
  */
-export function useQueryPipeline({ onComplete } = {}) {
+export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
   const [status, setStatus] = useState("idle");
   const [question, setQuestion] = useState("");
   const [startedAt, setStartedAt] = useState(null);
@@ -163,7 +163,7 @@ export function useQueryPipeline({ onComplete } = {}) {
       setError(null);
 
       try {
-        const [response, elapsedMs] = await timed(submitQuestion(cleanQuestion, clarification || ""));
+        const [response, elapsedMs] = await timed(submitQuestion(cleanQuestion, clarification || "", null, workspaceId));
         if (runToken.current.token !== token) return;
         handleResponse(response, elapsedMs, cleanQuestion, clarification);
       } catch (e) {
@@ -172,7 +172,7 @@ export function useQueryPipeline({ onComplete } = {}) {
         setStatus("error");
       }
     },
-    [handleResponse],
+    [handleResponse, workspaceId],
   );
 
   const selectClarification = useCallback(
@@ -190,7 +190,7 @@ export function useQueryPipeline({ onComplete } = {}) {
 
       try {
         // The original question plus the user's answer, through the same endpoint.
-        const [response, elapsedMs] = await timed(submitQuestion(question, cleanAnswer, clarification?.ticket));
+        const [response, elapsedMs] = await timed(submitQuestion(question, cleanAnswer, clarification?.ticket, workspaceId));
         if (runToken.current.token !== token) return;
         handleResponse(response, elapsedMs, question, cleanAnswer);
       } catch (e) {
@@ -199,7 +199,7 @@ export function useQueryPipeline({ onComplete } = {}) {
         setStatus("error");
       }
     },
-    [question, clarification, handleResponse],
+    [question, clarification, handleResponse, workspaceId],
   );
 
   const confirm = useCallback(async () => {

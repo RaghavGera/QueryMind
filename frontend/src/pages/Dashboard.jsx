@@ -6,6 +6,9 @@ import { useAuth, useUsage } from "../auth/AuthProvider";
 import { OutOfQuestions, TriesLeft } from "../auth/UsageNotice";
 import { usageGate } from "../services/session.js";
 import { library, useLibrary } from "../hooks/useLibrary";
+import { useWorkspaces } from "../hooks/useWorkspaces";
+import { getSchema } from "../services/schemaApi";
+import { DEMO_ID } from "../services/workspaces.js";
 import { makeSnapshot, newId } from "../services/storedQueries";
 import { relativeTime } from "../lib/utils";
 import QueryInput from "../components/query/QueryInput";
@@ -23,15 +26,30 @@ import {
   pipelineStagesAfterClarification,
 } from "../data/mockData";
 
-// Which data questions go to. Only the demo until the workspace switcher
-// (Phase 8); entries record it so history can follow the active workspace.
-const WORKSPACE_ID = "demo";
+/** Starter questions for the user's own data, from its table names. */
+function ownSuggestions(schema) {
+  const tables = (schema?.tables || []).map((t) => t.name.replace(/_/g, " "));
+  return tables.slice(0, 4).map((name) => `How many ${name} are there?`);
+}
 
-export default function Dashboard() {
+/** One Ask page per workspace: switching in the top bar starts a fresh one. */
+export default function DashboardPage() {
+  const { activeId } = useWorkspaces();
+  return <Dashboard key={activeId} activeId={activeId} />;
+}
+
+function Dashboard({ activeId }) {
+  // Which data questions go to: the demo or the user's workspace (top bar).
+  const ownData = activeId !== DEMO_ID;
+  const [ownSchema, setOwnSchema] = useState(null);
+  // A question put in the input by "Re-run"; the user still submits it.
+  const [draft, setDraft] = useState("");
+  const [notice, setNotice] = useState(null);
   const pipeline = useQueryPipeline({
+    workspaceId: activeId,
     onComplete: (entry) => {
       library
-        .addHistory({ id: newId("q"), executedAt: new Date().toISOString(), workspaceId: WORKSPACE_ID, ...entry })
+        .addHistory({ id: newId("q"), executedAt: new Date().toISOString(), workspaceId: activeId, ...entry })
         .catch(() => setNotice("This answer couldn't be added to your history. It will still show here."));
     },
   });
@@ -62,10 +80,18 @@ export default function Dashboard() {
   const usage = useUsage();
   const gate = usageGate(usage, status, clarification);
 
+  useEffect(() => {
+    if (!ownData) return undefined;
+    let alive = true;
+    getSchema({ workspaceId: activeId })
+      .then((schema) => alive && setOwnSchema(schema))
+      .catch(() => alive && setOwnSchema(null));
+    return () => {
+      alive = false;
+    };
+  }, [activeId, ownData]);
+
   const [searchParams, setSearchParams] = useSearchParams();
-  // A question put in the input by "Re-run"; the user still submits it.
-  const [draft, setDraft] = useState("");
-  const [notice, setNotice] = useState(null);
   useLibrary(); // re-render when saved queries change (the Save toggle below)
 
   // Links from Query History / Saved Queries:
@@ -130,7 +156,7 @@ export default function Dashboard() {
       : (() => {
           const snapshot = makeSnapshot({ sql, params, result, warnings });
           if (restored) snapshot.totalRows = restored.totalRows; // rows were already capped
-          return library.save({ question, resolved: selectedChoice, durationMs: executionMs, snapshot, workspaceId: WORKSPACE_ID });
+          return library.save({ question, resolved: selectedChoice, durationMs: executionMs, snapshot, workspaceId: activeId });
         })();
     done.catch((e) => setNotice(e.message));
   };
@@ -156,7 +182,9 @@ export default function Dashboard() {
               innerClassName="text-gradient"
             />
             <p className="mt-3 text-ink-dim">
-              QueryMind will clarify anything genuinely ambiguous before it runs.
+              {ownData
+                ? "Asking your own data. It's read-only: QueryMind never changes it."
+                : "QueryMind will clarify anything genuinely ambiguous before it runs."}
             </p>
           </div>
           <div className="w-full max-w-xl space-y-4">
@@ -168,7 +196,11 @@ export default function Dashboard() {
             )}
             <QueryInput key={draft} initialValue={draft} autoFocus={Boolean(draft)} onSubmit={submit} disabled={gate.outOfQuestions} />
             {!signedIn && <TriesLeft usage={usage} signedIn={false} />}
-            {gate.outOfQuestions ? <OutOfQuestions signedIn={signedIn} /> : <SuggestionChips items={suggestedQuestions} onPick={submit} />}
+            {gate.outOfQuestions ? (
+              <OutOfQuestions signedIn={signedIn} />
+            ) : (
+              <SuggestionChips items={ownData ? ownSuggestions(ownSchema) : suggestedQuestions} onPick={submit} />
+            )}
           </div>
         </motion.div>
       ) : (

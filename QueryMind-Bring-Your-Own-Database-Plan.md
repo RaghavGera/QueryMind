@@ -1,6 +1,6 @@
 # QueryMind: accounts and bring your own database (plan)
 
-> **Status (2026-10-19): Phase 1 done and verified live; Phases 1–3 live; Phase 4 built and tested locally (live check after the owner's push); Phase 5 next.** The decisions below were made by the owner. Work goes phase by phase; each phase ends with tests, a live check, and a commit message for the owner.
+> **Status (2026-10-19): Phase 1 done and verified live; Phases 1–4 live and verified (live eval 41/41, 2026-10-19); Phase 5 (with the upload screen, switcher and AI fixes from Phases 7–8) built and tested locally 2026-10-20; Phase 6 next.** The decisions below were made by the owner. Work goes phase by phase; each phase ends with tests, a live check, and a commit message for the owner.
 
 ## Decisions
 
@@ -90,6 +90,11 @@ Never paste these values into chat; use the dashboards' environment screens.
 14. History and saved queries record which workspace they belong to.
 
 ### Phase 5: file uploads
+
+> Built 2026-10-20 in the combined scope. Measured locally: HR eval 60/60 over three runs, demo eval 41/41, browser end-to-end 11/11 (upload, edit, import, ask, schema, history per workspace, delete). Phase 7 items 23–25 are done here (own-data prompt, demo-only rules, the HR dataset as the second sample); Phase 8 is done except the PostgreSQL tab, which comes with Phase 6.
+
+> Decisions (owner, 2026-10-19): an **editable** preview (rename tables and columns, change a column's type, leave out a file or sheet); ambiguous dates read **day first** (DD/MM), flagged and switchable per column; build it **usable end to end**: with Phase 5 also come the upload screen and workspace switcher (from Phase 8) and the AI fixes (from Phase 7: schema-neutral prompt, demo-only business rules, a second sample dataset with its own eval); new dependency **python-multipart** (plus openpyxl). The owner asked for the best possible work over saving effort.
+
 15. **Limits:** CSV or XLSX, ≤ 10 files, ≤ 10 MB total, ≤ 200k rows per file.
 16. **Processing:**
     - infer column types (integer, numeric, date, timestamp, boolean, text);

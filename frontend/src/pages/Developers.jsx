@@ -36,6 +36,8 @@ const ENDPOINTS = [
   { method: "GET", path: "/health", detail: "Database connectivity, and whether writes are enabled on this server." },
   { method: "POST", path: "/auth/google", detail: "Exchange a Google access token (or ID token) for a 7-day session token, sent as Authorization: Bearer on later requests." },
   { method: "GET", path: "/auth/usage", detail: "Today's question count and limit for whoever is calling, signed in or not." },
+  { method: "GET", path: "/workspaces", detail: "The demo store plus your own workspace (one per account). Pass its id as workspace_id to /query and /schema." },
+  { method: "POST", path: "/workspaces/uploads", detail: "Import CSV or Excel files as your private, read-only workspace for 7 days; /workspaces/uploads/preview shows the editable plan first." },
 ];
 
 const OPTIONS = [

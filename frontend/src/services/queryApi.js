@@ -34,10 +34,12 @@ export async function request(path, options = {}) {
   let response;
 
   try {
+    // FormData (file uploads) sets its own multipart Content-Type with the boundary.
+    const json = !(options.body instanceof FormData);
     response = await fetch(apiUrl(path), {
       ...options,
       headers: {
-        "Content-Type": "application/json",
+        ...(json ? { "Content-Type": "application/json" } : {}),
         ...authHeader(),
         ...(options.headers || {}),
       },
@@ -80,13 +82,14 @@ export async function request(path, options = {}) {
  * ``ticket`` comes with a clarification question: sending the answer with it
  * doesn't count as another question.
  */
-export async function submitQuestion(question, clarificationContext = "", ticket = null) {
+export async function submitQuestion(question, clarificationContext = "", ticket = null, workspaceId = null) {
   const settings = getSettings();
   return request("/query", {
     method: "POST",
     headers: ticket ? { "X-Clarification-Ticket": ticket } : {},
     body: JSON.stringify({
       question,
+      workspace_id: workspaceId && workspaceId !== "demo" ? workspaceId : null,
       clarification_context: clarificationContext || null,
       strict: settings.askForClarification,
       allow_writes: settings.allowWrites,
@@ -165,4 +168,36 @@ export function deleteSavedEntry(id) {
 /** Move this browser's entries into the account; ones it already has are skipped. */
 export function importEntries({ history, saved }) {
   return request("/me/import", { method: "POST", body: JSON.stringify({ history, saved }) });
+}
+
+// Workspaces and uploads (see app/workspaces.py, app/uploads.py) ----------- //
+
+export function fetchWorkspaces() {
+  return request("/workspaces");
+}
+
+export function deleteWorkspace(id) {
+  return request(`/workspaces/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+function uploadForm(files, fields) {
+  const form = new FormData();
+  for (const file of files) form.append("files", file, file.name);
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined && value !== null) form.append(key, typeof value === "string" ? value : JSON.stringify(value));
+  }
+  return form;
+}
+
+/** What the files contain, as an editable plan; ``plan`` (the edits) is checked when given. */
+export function previewUpload(files, plan = null) {
+  return request("/workspaces/uploads/preview", { method: "POST", body: uploadForm(files, { plan }) });
+}
+
+/** Import the files with the preview's edits as the user's workspace. */
+export function importUpload(files, { plan, name, replace }) {
+  return request("/workspaces/uploads", {
+    method: "POST",
+    body: uploadForm(files, { plan, name: name || "", replace: replace ? "true" : "false" }),
+  });
 }

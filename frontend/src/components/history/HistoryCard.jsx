@@ -11,7 +11,7 @@ const statusLabel = { success: "Successful", clarification: "Clarification requi
  *   Reopen  shows the stored result without calling the backend
  *   Re-run  puts the question in the Ask box (the user submits it)
  */
-export default function HistoryCard({ entry, onReopen, onRerun, onDelete, deleteLabel = "Delete" }) {
+export default function HistoryCard({ entry, onReopen, onRerun, onDelete, deleteLabel = "Delete", tag = null }) {
   const snapshot = entry.snapshot;
   const when = entry.savedAt || entry.executedAt;
   const rowCount = snapshot ? snapshot.totalRows ?? snapshot.rows.length : 0;
@@ -27,6 +27,7 @@ export default function HistoryCard({ entry, onReopen, onRerun, onDelete, delete
       <div className="min-w-0">
         <p className="truncate text-sm font-medium text-ink">{entry.question}</p>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-dim">
+          {tag && <Badge tone="warning">{tag}</Badge>}
           {entry.status && <Badge tone={statusTone[entry.status]}>{statusLabel[entry.status]}</Badge>}
           {entry.resolved && <span>Clarified: {entry.resolved}</span>}
           {snapshot && <span>{rowCount} row{rowCount === 1 ? "" : "s"}</span>}

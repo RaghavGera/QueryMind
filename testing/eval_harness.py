@@ -204,15 +204,29 @@ class RunResult:
     status: Optional[str] = None
 
 
-def post_query(base_url: str, question: str, timeout: float = 90.0, retries: int = 3):
-    """POST /query, retrying throttling/cold-start responses. Returns (http_status, body)."""
-    payload = json.dumps({"question": question}).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
-    # The API requires sign-in and daily limits; the eval runs with the
-    # server's service key instead (set QUERYMIND_SERVICE_KEY locally too).
+def _auth_headers() -> Dict[str, str]:
+    """
+    The API has daily limits; the eval runs with the server's service key
+    (QUERYMIND_SERVICE_KEY). Questions about an uploaded workspace also need
+    a session of its owner (QUERYMIND_SESSION_TOKEN).
+    """
+    headers = {}
     service_key = os.getenv("QUERYMIND_SERVICE_KEY", "").strip()
     if service_key:
         headers["X-Service-Key"] = service_key
+    token = os.getenv("QUERYMIND_SESSION_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def post_query(base_url: str, question: str, timeout: float = 90.0, retries: int = 3, workspace_id: Optional[str] = None):
+    """POST /query, retrying throttling/cold-start responses. Returns (http_status, body)."""
+    body = {"question": question}
+    if workspace_id:
+        body["workspace_id"] = workspace_id
+    payload = json.dumps(body).encode("utf-8")
+    headers = {"Content-Type": "application/json", **_auth_headers()}
     request = urllib.request.Request(f"{base_url.rstrip('/')}/query", data=payload, headers=headers, method="POST")
     last = (0, {"status": "error", "error": "no response"})
     for attempt in range(retries + 1):
@@ -238,6 +252,37 @@ def post_query(base_url: str, question: str, timeout: float = 90.0, retries: int
             wait = 2 ** (attempt + 1)
         time.sleep(min(wait, 15.0))
     return last
+
+
+def upload_workspace(base_url: str, folder: Path, timeout: float = 300.0) -> str:
+    """Upload every CSV in ``folder`` as the session's workspace (replacing it); returns its id."""
+    boundary = f"----querymind-eval-{int(time.time() * 1000)}"
+    parts = []
+    for path in sorted(folder.glob("*.csv")):
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="files"; filename="{path.name}"\r\n'
+            "Content-Type: text/csv\r\n\r\n".encode() + path.read_bytes() + b"\r\n"
+        )
+    for field_name, value in (("name", f"Eval: {folder.name}"), ("replace", "true")):
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{field_name}"\r\n\r\n{value}\r\n'.encode())
+    data = b"".join(parts) + f"--{boundary}--\r\n".encode()
+    headers = {"Content-Type": f"multipart/form-data; boundary={boundary}", **_auth_headers()}
+    request = urllib.request.Request(f"{base_url.rstrip('/')}/workspaces/uploads", data=data, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))["workspace"]["id"]
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:300]
+        raise SystemExit(f"Upload failed (HTTP {exc.code}): {detail}. Set QUERYMIND_SESSION_TOKEN to a session of the workspace owner.")
+
+
+def delete_workspace(base_url: str, workspace_id: str) -> None:
+    request = urllib.request.Request(
+        f"{base_url.rstrip('/')}/workspaces/{workspace_id}", headers=_auth_headers(), method="DELETE")
+    try:
+        urllib.request.urlopen(request, timeout=60).close()
+    except urllib.error.URLError:
+        print(f"(could not delete workspace {workspace_id}; it expires on its own)", file=sys.stderr)
 
 
 def build_offline_runner():
@@ -379,9 +424,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--runs", type=int, default=1, help="Repeat each question N times")
     parser.add_argument("--delay", type=float, default=1.0, help="Seconds between requests")
     parser.add_argument("--json", dest="json_out", help="Write detailed results to this file")
+    parser.add_argument("--questions", type=Path, default=QUESTIONS_PATH,
+                        help="Question file (default: the demo store's eval_questions.json)")
+    parser.add_argument("--upload", type=Path,
+                        help="Upload this folder's CSV files as a workspace and ask it (needs QUERYMIND_SESSION_TOKEN)")
     args = parser.parse_args(argv)
 
-    questions = load_questions()
+    questions = load_questions(args.questions)
     if args.only:
         wanted = set(args.only)
         unknown = wanted - {q["id"] for q in questions}
@@ -390,16 +439,24 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 2
         questions = [q for q in questions if q["id"] in wanted]
 
+    workspace_id = None
     if args.offline:
         send = build_offline_runner()
         target = "offline (in-process, in-memory schema)"
     else:
+        if args.upload:
+            workspace_id = upload_workspace(args.base_url, args.upload)
+
         def send(question):
-            return post_query(args.base_url, question)
-        target = args.base_url
+            return post_query(args.base_url, question, workspace_id=workspace_id)
+        target = args.base_url + (f" (workspace {workspace_id}, uploaded from {args.upload})" if workspace_id else "")
     print(f"Evaluating {len(questions)} question(s) x {args.runs} run(s) against {target}\n")
 
-    results = evaluate(questions, send, runs=args.runs, delay=args.delay, check_rows=not args.offline)
+    try:
+        results = evaluate(questions, send, runs=args.runs, delay=args.delay, check_rows=not args.offline)
+    finally:
+        if workspace_id:
+            delete_workspace(args.base_url, workspace_id)
     summary = summarize(questions, results)
     print_summary(questions, results, summary)
 

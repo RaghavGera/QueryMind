@@ -12,15 +12,18 @@ parameters) for the caller to run, along with whatever clarification is
 needed if the pipeline couldn't safely produce a query.
 """
 
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import Depends, FastAPI, Header, Request
+from fastapi import Depends, FastAPI, File, Form, Header, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+import json
 import logging
 import os
+import threading
+import time
 
 from app.accounts import SAVED_LIMIT, AccountStore, clean_entry, next_reset
 from app.ambiguity_detector import AmbiguityDetector
@@ -38,6 +41,7 @@ from app.auth import (
     verify_google_id_token,
 )
 from app import writes
+from app import uploads
 from app.workspaces import DEMO, DEMO_ID, SchemaCache, ScopedDatabase, Workspace, WorkspaceError, WorkspaceStore
 from app.database import Database, QueryTimeoutError, WriteConflictError, get_db, init_db, max_result_rows
 from app.intent_converter import IntentConversionError, convert_query_intent
@@ -128,16 +132,23 @@ def _roles_ready() -> bool:
 
 
 def resolve_principal(request: Request, store: AccountStore) -> Principal:
-    """Service key > valid session > anonymous visitor. Raises AuthError for bad tokens."""
-    if service_key_matches(request.headers.get("x-service-key")):
-        return Principal(kind="service", subject="service")
+    """
+    Service key > valid session > anonymous visitor. Raises AuthError for bad
+    tokens. The service key (the eval) skips the daily limits; sent with a
+    session it also acts as that user, so it can ask their workspace.
+    """
+    service = service_key_matches(request.headers.get("x-service-key"))
     token = bearer_token(request.headers.get("authorization"))
     if token:
         session_id = read_session_token(token)
         user = store.session_user(session_id)
         if user is None:
             raise AuthError("Your session has ended. Please sign in again.")
+        if service:
+            return Principal(kind="service", subject="service", user=user, session_id=session_id)
         return Principal(kind="user", subject=f"user:{user.id}", user=user, session_id=session_id)
+    if service:
+        return Principal(kind="service", subject="service")
     return Principal(kind="anonymous", subject=anonymous_subject(_request_ip(request)))
 
 
@@ -235,13 +246,27 @@ async def usage_limits(request: Request, call_next):
 MAX_ACCOUNT_BODY_BYTES = 8_000_000  # an import of 50 + 100 entries with results is far smaller
 
 
+# Files up to uploads.MAX_TOTAL_BYTES, plus room for the multipart wrapping and the plan.
+MAX_UPLOAD_BODY_BYTES = uploads.MAX_TOTAL_BYTES + 1024 * 1024
+
+
 @app.middleware("http")
 async def account_body_limit(request: Request, call_next):
-    """History and saved queries are stored as sent, so refuse oversized bodies before reading them."""
-    if request.url.path.startswith("/me/") and request.method in ("POST", "PUT"):
+    """History, saved queries and uploads are stored as sent, so refuse oversized bodies before reading them."""
+    limit = None
+    if request.method in ("POST", "PUT"):
+        if request.url.path.startswith("/me/"):
+            limit = MAX_ACCOUNT_BODY_BYTES
+        elif request.url.path.startswith("/workspaces/uploads"):
+            limit = MAX_UPLOAD_BODY_BYTES
+    if limit is not None:
         length = request.headers.get("content-length")
-        if length is None or not length.isdigit() or int(length) > MAX_ACCOUNT_BODY_BYTES:
-            return JSONResponse(status_code=413, content={"status": "error", "error": "That request is too large to store."})
+        if length is None or not length.isdigit() or int(length) > limit:
+            message = (
+                f"The files are too large; the limit is {uploads.MAX_TOTAL_BYTES // 1048576} MB in total."
+                if limit == MAX_UPLOAD_BODY_BYTES else "That request is too large to store."
+            )
+            return JSONResponse(status_code=413, content={"status": "error", "error": message})
     return await call_next(request)
 
 
@@ -274,8 +299,25 @@ async def startup_event():
         removed = store.delete_expired()
         if removed:
             logger.info("Removed %d expired workspace(s)", removed)
+        threading.Thread(target=_sweep_expired_workspaces, name="workspace-expiry", daemon=True).start()
     except Exception:
         logger.exception("Could not set up workspaces; the demo still runs")
+
+
+EXPIRY_SWEEP_SECONDS = 30 * 60
+
+
+def _sweep_expired_workspaces() -> None:
+    """Delete expired workspaces every 30 minutes (and at startup, above)."""
+    while True:
+        time.sleep(EXPIRY_SWEEP_SECONDS)
+        try:
+            removed = get_workspace_store().delete_expired()
+            if removed:
+                logger.info("Removed %d expired workspace(s)", removed)
+                schema_cache.forget()
+        except Exception:
+            logger.exception("Expired workspaces could not be removed; will retry")
     if not auth_configured():
         logger.warning("Sign-in is not configured: set GOOGLE_CLIENT_ID and SESSION_SECRET.")
 
@@ -481,7 +523,7 @@ def _workspace_for(principal: Optional[Principal], workspace_id: Optional[str]) 
     """The workspace a request may use: the demo, or the signed-in user's own."""
     if not workspace_id or workspace_id == DEMO_ID:
         return DEMO
-    if principal is None or principal.kind != "user":
+    if principal is None or principal.user is None:
         raise WorkspaceError("Sign in to ask questions about your own data.", status=401)
     workspace = get_workspace_store().for_user(principal.user.id)
     if workspace is None or workspace.id != str(workspace_id):
@@ -537,6 +579,89 @@ def delete_workspace(workspace_id: str, authorization: Optional[str] = Header(de
         return _workspace_error(WorkspaceError("That workspace doesn't exist or has expired.", status=404))
     schema_cache.forget(workspace_id)
     return {"status": "deleted"}
+
+
+def _read_files(files: List[UploadFile]) -> list:
+    """(filename, bytes) for each upload, stopping as soon as the total passes the limit."""
+    read, total = [], 0
+    for upload in files:
+        data = upload.file.read(uploads.MAX_TOTAL_BYTES + 1 - total)
+        total += len(data)
+        if total > uploads.MAX_TOTAL_BYTES:
+            raise uploads.UploadError(f"The files add up to more than {uploads.MAX_TOTAL_BYTES // 1048576} MB.")
+        read.append((upload.filename or "upload", data))
+    return read
+
+
+def _upload_plan(files: List[UploadFile], plan: Optional[str]):
+    raws = uploads.parse_files(_read_files(files))
+    analysed = uploads.analyse(raws)
+    if plan:
+        try:
+            edits = json.loads(plan)
+        except ValueError as exc:
+            raise uploads.UploadError("The preview edits couldn't be read; reload and try again.") from exc
+        uploads.apply_edits(analysed, raws, edits if isinstance(edits, dict) else None)
+    return analysed, raws
+
+
+def _upload_error(exc: uploads.UploadError) -> JSONResponse:
+    return JSONResponse(status_code=422, content={"status": "error", "error": str(exc)})
+
+
+@app.post("/workspaces/uploads/preview")
+def preview_upload(
+    files: List[UploadFile] = File(...),
+    plan: Optional[str] = Form(None),
+    authorization: Optional[str] = Header(default=None),
+):
+    """What the files contain, as an editable plan. Send ``plan`` (the edits) to check them again."""
+    try:
+        principal = _session_principal(authorization)
+    except AuthError as exc:
+        return _auth_error(exc)
+    try:
+        analysed, _ = _upload_plan(files, plan)
+    except uploads.UploadError as exc:
+        return _upload_error(exc)
+    current = get_workspace_store().for_user(principal.user.id)
+    return {**uploads.to_preview(analysed), "replaces": current.to_dict() if current else None}
+
+
+@app.post("/workspaces/uploads")
+def import_upload(
+    files: List[UploadFile] = File(...),
+    plan: Optional[str] = Form(None),
+    name: str = Form(""),
+    replace: bool = Form(False),
+    authorization: Optional[str] = Header(default=None),
+):
+    """Import the files (with the preview's edits) as the user's workspace."""
+    try:
+        principal = _session_principal(authorization)
+    except AuthError as exc:
+        return _auth_error(exc)
+    try:
+        analysed, raws = _upload_plan(files, plan)
+    except uploads.UploadError as exc:
+        return _upload_error(exc)
+
+    outcome = {}
+
+    def fill(conn, workspace):
+        outcome.update(uploads.import_tables(conn, workspace.schema, analysed, raws))
+
+    default_name = analysed.tables[0].source.split(" › ")[0].rsplit(".", 1)[0] if analysed.tables else "My data"
+    try:
+        workspace = get_workspace_store().create(
+            principal.user.id, "upload", name or default_name, replace=replace, fill=fill
+        )
+    except WorkspaceError as exc:
+        return _workspace_error(exc)
+    except uploads.UploadError as exc:
+        return _upload_error(exc)
+    schema_cache.forget(workspace.id)
+    return {"workspace": workspace.to_dict(), **outcome}
 
 
 def _schema_context(schema: DatabaseSchema) -> dict:
@@ -659,10 +784,13 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
             500, "Database schema could not be inspected.", details=str(exc)
         )
 
+    demo = not getattr(db, "read_only_workspace", False)  # the demo, or the user's own workspace
+    context = _schema_context(schema)
+    context["dataset"] = "demo" if demo else "own"
     try:
         query_intent = extract_intent(
             question,
-            _schema_context(schema)
+            context
         )
     except IntentExtractionError as exc:
         status_code, message = _EXTRACTION_ERROR_STATUS.get(
@@ -680,6 +808,7 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
             query_intent,
             question,
             schema=schema,
+            demo_rules=demo,
         )
     except IntentConversionError as exc:
         return _error_response(
@@ -704,7 +833,7 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
 
     generator = SQLGenerator(
         schema,
-        AmbiguityDetector(schema),
+        AmbiguityDetector(schema, demo=demo),
         strict=request.strict,
     )
 

@@ -185,38 +185,65 @@ class WorkspaceStore:
             return None
         return workspace
 
-    def create(self, user_id: int, kind: str, name: str, replace: bool = False) -> Workspace:
+    def create(
+        self,
+        user_id: int,
+        kind: str,
+        name: str,
+        replace: bool = False,
+        fill: Optional[Callable] = None,
+    ) -> Workspace:
         """
-        Create the user's workspace: a row, an empty schema ``ws_<id>`` and its
-        read role. With ``replace`` an existing workspace is deleted first;
-        without it, having one is a 409.
+        Create the user's workspace: a row, a schema ``ws_<id>`` and its read
+        role, then ``fill(conn, workspace)`` (the import) in the same
+        transaction. With ``replace`` an existing workspace is dropped in that
+        transaction too, so a failed import leaves the old one untouched;
+        without ``replace``, having one is a 409.
         """
         if kind not in EXPIRY:
             raise WorkspaceError(f"Unknown workspace kind {kind!r}.")
         if not self.roles_available:
             raise WorkspaceError("Your own data can't be added on this server right now.", status=503)
-        existing = self.for_user(user_id)
-        if existing is not None:
-            if not replace:
-                raise WorkspaceError(
-                    f"You already have a workspace ({existing.name}). Replace it to add another.", status=409
-                )
-            self.delete(user_id, existing.id)
         expires = datetime.now(timezone.utc) + EXPIRY[kind]
-        with self.db.get_connection() as conn:
-            row = conn.execute(
-                """
-                INSERT INTO querymind_meta.workspaces (user_id, kind, name, expires_at)
-                VALUES (%s, %s, %s, %s) RETURNING id, kind, name, expires_at
-                """,
-                (user_id, kind, name.strip()[:100] or "My data", expires),
-            ).fetchone()
-            workspace = _from_row(row)
-            conn.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(workspace.schema)))
-            _ensure_role(conn, workspace.role)
-            conn.execute(
-                sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(sql.Identifier(workspace.schema), sql.Identifier(workspace.role))
-            )
+        try:
+            with self.db.get_connection() as conn:
+                existing = conn.execute(
+                    "SELECT id, kind, name, expires_at FROM querymind_meta.workspaces WHERE user_id = %s FOR UPDATE",
+                    (user_id,),
+                ).fetchone()
+                if existing is not None:
+                    old = _from_row(existing)
+                    if old.expires_at > datetime.now(timezone.utc) and not replace:
+                        raise WorkspaceError(
+                            f"You already have a workspace ({old.name}). Replace it to add another.", status=409
+                        )
+                    conn.execute("DELETE FROM querymind_meta.workspaces WHERE id = %s", (int(old.id),))
+                    _drop_storage(conn, old)
+                row = conn.execute(
+                    """
+                    INSERT INTO querymind_meta.workspaces (user_id, kind, name, expires_at)
+                    VALUES (%s, %s, %s, %s) RETURNING id, kind, name, expires_at
+                    """,
+                    (user_id, kind, name.strip()[:100] or "My data", expires),
+                ).fetchone()
+                workspace = _from_row(row)
+                conn.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(workspace.schema)))
+                _ensure_role(conn, workspace.role)
+                conn.execute(
+                    sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(
+                        sql.Identifier(workspace.schema), sql.Identifier(workspace.role)
+                    )
+                )
+                if fill is not None:
+                    fill(conn, workspace)
+                    conn.execute(
+                        sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}").format(
+                            sql.Identifier(workspace.schema), sql.Identifier(workspace.role)
+                        )
+                    )
+        except psycopg.errors.UniqueViolation as exc:
+            # Two uploads at once from the same account: the second one loses.
+            raise WorkspaceError("Another upload for your account is in progress. Try again in a moment.", status=409) from exc
         return workspace
 
     def grant_tables(self, workspace: Workspace) -> None:

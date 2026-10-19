@@ -853,6 +853,22 @@ class SQLGenerator:
         }
         return bool(types) and types <= _TEXT_TYPES
 
+    def _is_boolean_column(self, cond: Condition, tables: Optional[List[str]]) -> bool:
+        candidates = [cond.table] if cond.table else (tables or [])
+        types = {
+            self.schema.tables[t].columns[cond.column].data_type.lower()
+            for t in candidates
+            if t in self.schema.tables and cond.column in self.schema.tables[t].columns
+        }
+        return types == {"boolean"}
+
+    @staticmethod
+    def _as_boolean(value: Any) -> Any:
+        """1/0 for a yes/no column becomes true/false: Postgres has no boolean = integer."""
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value in (0, 1):
+            return bool(value)
+        return value
+
     def _build_condition_clause(
         self, conditions: List[Condition], tables: Optional[List[str]] = None
     ) -> Tuple[str, List[Any]]:
@@ -879,6 +895,12 @@ class SQLGenerator:
 
         if op in (ConditionOperator.IS_NULL, ConditionOperator.IS_NOT_NULL):
             return f"{col} {op.value}", []
+
+        if self._is_boolean_column(cond, tables):
+            # Seen 2026-10-20 on uploaded data: "active employees" as active = 1.
+            value = cond.value
+            values = [self._as_boolean(v) for v in value] if isinstance(value, list) else self._as_boolean(value)
+            cond = cond.model_copy(update={"value": values})
 
         text_column = self._is_text_column(cond, tables)
 

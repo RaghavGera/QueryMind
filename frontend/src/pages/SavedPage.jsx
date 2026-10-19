@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { AlertTriangle, Bookmark, Loader2 } from "lucide-react";
 import { library, useLibrary } from "../hooks/useLibrary";
 import { useAuth } from "../auth/AuthProvider";
-import HistoryCard from "../components/history/HistoryCard";
+import EntryList from "../components/history/EntryList";
 import PageHeader from "../components/ui/PageHeader";
 
 export default function SavedPage() {
@@ -43,27 +42,23 @@ export default function SavedPage() {
         <div className="flex h-40 items-center justify-center gap-2 text-ink-dim">
           <Loader2 size={16} className="animate-spin" /> Loading saved queries...
         </div>
-      ) : saved.length === 0 ? (
-        status === "ready" && (
-          <div className="hud flex flex-col items-center justify-center gap-2 py-16 text-center">
-            <Bookmark size={22} className="text-ink-faint" />
-            <p className="text-sm text-ink-dim">Nothing saved yet.</p>
-            <p className="text-xs text-ink-faint">Run a query, then press Save above its result.</p>
-          </div>
-        )
       ) : (
-        <AnimatePresence>
-          {saved.map((entry) => (
-            <HistoryCard
-              key={entry.id}
-              entry={entry}
-              onReopen={handleReopen}
-              onRerun={handleRerun}
-              onDelete={handleDelete}
-              deleteLabel="Remove from saved"
-            />
-          ))}
-        </AnimatePresence>
+        <EntryList
+          entries={saved}
+          onReopen={handleReopen}
+          onRerun={handleRerun}
+          onDelete={handleDelete}
+          deleteLabel="Remove from saved"
+          empty={
+            status === "ready" && (
+              <div className="hud flex flex-col items-center justify-center gap-2 py-16 text-center">
+                <Bookmark size={22} className="text-ink-faint" />
+                <p className="text-sm text-ink-dim">Nothing saved yet.</p>
+                <p className="text-xs text-ink-faint">Run a query, then press Save above its result.</p>
+              </div>
+            )
+          }
+        />
       )}
     </div>
   );

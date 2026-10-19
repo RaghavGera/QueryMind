@@ -189,5 +189,5 @@ class Principal:
 
     kind: str  # "user" | "anonymous" | "service"
     subject: str  # usage key
-    user: object = None  # accounts.User when kind == "user"
+    user: object = None  # accounts.User for a session (kind "user", or "service" sent with one)
     session_id: Optional[str] = None

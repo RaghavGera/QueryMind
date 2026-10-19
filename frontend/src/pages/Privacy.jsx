@@ -19,6 +19,14 @@ const SECTIONS = [
     ],
   },
   {
+    title: "Files you upload",
+    body: [
+      "When you upload CSV or Excel files, their rows are stored in a private schema of our database that only your account can query, through a read-only database role that can see nothing else. QueryMind never changes them.",
+      "Uploaded data is deleted after 7 days, when you delete or replace your workspace, or when your account is deleted. Your query history and saved queries about it stay until you delete them, marked “workspace expired”.",
+      "To answer questions, the language-model provider receives your table and column names (not the rows), plus your question.",
+    ],
+  },
+  {
     title: "Your questions",
     body: [
       "To understand a question, QueryMind sends its text and the database schema (table and column names) to a language-model provider: Google Gemini or Groq. Query results are not sent to them.",

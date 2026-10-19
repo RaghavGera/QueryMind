@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Upload your own data (Phase 5).** A **Your Data** page takes CSV or Excel files (10 files,
+  10 MB, 200,000 rows per table), shows an editable preview (types checked against every value,
+  clean names, keys, links kept only when every value matches, day-first dates flagged and
+  switchable, file quirks reported) and imports it in one transaction as the user's private,
+  read-only workspace for 7 days: typed tables, `COPY`, real keys and foreign keys, a 25 MB quota
+  per user and a 300 MB cap overall; a failed import leaves the old workspace untouched. Excel
+  files are checked for zip bombs and XML entity declarations before opening. New dependencies:
+  `python-multipart` (FastAPI file uploads) and `openpyxl` (Excel).
+- **Workspace switcher** in the top bar (the demo or your workspace, with its expiry; upload,
+  replace, delete). Ask, Schema, History and Saved follow the active workspace; entries of
+  expired workspaces stay, labelled, and still reopen. Starter questions come from your tables.
+- **Schema-neutral AI for your own data:** its own prompt (examples on a made-up schema) and none
+  of the demo's business rules (units-sold ranking, completed sales); "rank by what?" suggests
+  your own number columns.
+- **A second sample dataset with its own eval:** `testing/fixtures/hr` (generated, messy on
+  purpose) and `eval_questions_hr.json` (20 questions, answers computed from the data). The
+  harness gained `--questions` and `--upload`. Measured locally on 2026-10-20: 60/60 over three
+  runs; the demo eval stayed 41/41.
 - **Workspaces (Phase 4).** A question runs against a workspace: the shared, read-only demo, or a
   signed-in user's own (one per user; a new one replaces it; uploads expire after 7 days,
   connections after 24 hours, removed at startup and on lookup). `GET /workspaces`,
@@ -170,6 +188,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- Three pipeline gaps found by the HR eval, each now a regression test: sorting a grouped query
+  by a raw aggregated column (`MIN(budget) ... ORDER BY budget`, which Postgres rejects) now sorts
+  by the aggregate; a plain column listed as an aggregation is selected instead of failing the
+  conversion; `1`/`0` compared with a yes/no column becomes `true`/`false` (Postgres has no
+  `boolean = integer`).
 - **Live outage after the workspaces deploy (2026-10-19): every answer failed** with "permission
   denied to set role querymind_demo". On PostgreSQL 16+ a non-superuser that creates a role (Neon's
   owner) gets only ADMIN on it, which counts as membership but doesn't allow `SET ROLE`; the setup
