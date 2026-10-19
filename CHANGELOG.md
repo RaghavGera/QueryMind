@@ -170,6 +170,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer read. The supported providers are Gemini and Groq.
 
 ### Fixed
+- **Live outage after the workspaces deploy (2026-10-19): every answer failed** with "permission
+  denied to set role querymind_demo". On PostgreSQL 16+ a non-superuser that creates a role (Neon's
+  owner) gets only ADMIN on it, which counts as membership but doesn't allow `SET ROLE`; the setup
+  checked membership and skipped the grant, and never tried the switch, so the fail-safe didn't
+  trigger. The setup now grants the role to itself when `SET` isn't allowed and proves the switch
+  works (in a rolled-back savepoint) before using the roles. Reproduced locally with a CREATEROLE
+  login role standing in for Neon's owner; that is now a regression test.
 - **"Which ... the most" answers one thing again.** "Which region generated the most revenue?"
   started returning all 5 countries sorted (the model dropped `LIMIT 1`; seen locally and live on
   2026-10-19, eval 40/41). The converter now sets `LIMIT 1` itself for a "which/what <singular>

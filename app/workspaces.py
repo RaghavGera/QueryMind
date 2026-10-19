@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, Optional
 
+import psycopg
 from psycopg import sql
 
 logger = logging.getLogger(__name__)
@@ -253,15 +254,30 @@ class WorkspaceStore:
 
 
 def _ensure_role(conn, role: str) -> None:
-    """A NOLOGIN role the owner can switch to with SET ROLE."""
+    """
+    A NOLOGIN role the owner can switch to with SET ROLE, proven by switching
+    to it (raises if that is refused).
+
+    On PostgreSQL 16+ a non-superuser that creates a role is only given ADMIN
+    on it (createrole_self_grant is empty by default), which counts as
+    membership but does not allow SET ROLE. Granting the role to ourselves adds
+    the SET option. Neon's owner role is such a non-superuser.
+    """
     exists = conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (role,)).fetchone()
     if not exists:
         conn.execute(sql.SQL("CREATE ROLE {} NOLOGIN").format(sql.Identifier(role)))
-    member = conn.execute(
-        "SELECT pg_has_role(current_user, %s, 'MEMBER') AS ok", (role,)
-    ).fetchone()
-    if not member["ok"]:
+    if not _can_set_role(conn, role):
         conn.execute(sql.SQL("GRANT {} TO CURRENT_USER").format(sql.Identifier(role)))
+    with conn.transaction(force_rollback=True):  # a savepoint: the switch is undone right away
+        conn.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
+
+
+def _can_set_role(conn, role: str) -> bool:
+    try:
+        with conn.transaction():  # savepoint: the 'SET' privilege type is unknown before PostgreSQL 16
+            return conn.execute("SELECT pg_has_role(current_user, %s, 'SET') AS ok", (role,)).fetchone()["ok"]
+    except psycopg.Error:
+        return conn.execute("SELECT pg_has_role(current_user, %s, 'MEMBER') AS ok", (role,)).fetchone()["ok"]
 
 
 def _drop_storage(conn, workspace: Workspace) -> None:

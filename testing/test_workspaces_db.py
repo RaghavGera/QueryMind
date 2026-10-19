@@ -141,3 +141,47 @@ def test_a_question_runs_against_the_chosen_workspace(db, stores, monkeypatch):
     assert ask(bob, mine.id)[0] == 404, "someone else's workspace"
     assert ask(None, mine.id)[0] == 401, "signed out"
     main_module.schema_cache.forget()
+
+
+def test_roles_work_for_a_non_superuser_owner_like_neon(db):
+    """
+    Regression (2026-10-19, live outage): on PostgreSQL 16+ a non-superuser
+    that creates a role only gets ADMIN on it, which is not enough for SET
+    ROLE. Neon's owner is such a user; the local test database is a superuser,
+    so reproduce Neon with a CREATEROLE login role.
+    """
+    import secrets
+    from psycopg import sql as psql
+    from app.database import Database, DatabaseConfig
+
+    with db.get_connection() as conn:
+        if not conn.execute("SELECT rolsuper FROM pg_roles WHERE rolname = current_user").fetchone()["rolsuper"]:
+            pytest.skip("needs a superuser to create the stand-in owner role")
+    owner, demo_role, password = f"qm_owner_{uuid.uuid4().hex[:8]}", f"qm_demo_{uuid.uuid4().hex[:8]}", secrets.token_urlsafe(16)
+    with db.get_connection() as conn:
+        conn.execute(psql.SQL("CREATE ROLE {} LOGIN CREATEROLE PASSWORD {}").format(psql.Identifier(owner), psql.Literal(password)))
+        conn.execute(psql.SQL("GRANT USAGE ON SCHEMA public TO {} WITH GRANT OPTION").format(psql.Identifier(owner)))
+        conn.execute(psql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {} WITH GRANT OPTION").format(psql.Identifier(owner)))
+    try:
+        config = DatabaseConfig()
+        config.user, config.password = owner, password
+        as_owner = Database(config)
+        import app.workspaces as workspaces_module
+        with as_owner.get_connection() as conn:
+            workspaces_module._ensure_role(conn, demo_role)  # raises if SET ROLE is still refused
+            conn.execute(psql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {}").format(psql.Identifier(demo_role)))
+        rows = as_owner.execute_query("SELECT count(*) AS n FROM customers", role=demo_role)
+        assert rows[0]["n"] > 0
+    finally:
+        _drop_stand_in_roles(db, owner, demo_role)
+
+
+def _drop_stand_in_roles(db, *roles):
+    # One DROP OWNED ... CASCADE for all of them: it revokes the grants they gave each other.
+    from psycopg import sql as psql
+    with db.get_connection() as conn:
+        present = [r for r in roles if conn.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (r,)).fetchone()]
+        if present:
+            names = psql.SQL(", ").join(psql.Identifier(r) for r in present)
+            conn.execute(psql.SQL("DROP OWNED BY {} CASCADE").format(names))
+            conn.execute(psql.SQL("DROP ROLE {}").format(names))
