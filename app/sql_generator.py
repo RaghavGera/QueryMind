@@ -107,6 +107,9 @@ class SQLGenerationResult(BaseModel):
     ambiguity_result: Optional[AmbiguityDetectionResult] = Field(
         default=None, description="Full ambiguity detection result, for callers that want detail"
     )
+    intent: Optional[StructuredIntent] = Field(
+        default=None, description="The final intent the SQL was built from (after auto-resolution)"
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -273,6 +276,7 @@ class SQLGenerator:
             params=params,
             warnings=warnings,
             ambiguity_result=ambiguity_result,
+            intent=working_intent,
         )
 
     # ------------------------------------------------------------------ #

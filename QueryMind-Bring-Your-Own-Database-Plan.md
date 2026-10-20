@@ -107,6 +107,9 @@ Never paste these values into chat; use the dashboards' environment screens.
 19. **No `.sql` dumps:** uploaded SQL could execute arbitrary statements.
 
 ### Phase 6: connect your own PostgreSQL
+
+> **On hold (owner, 2026-10-20):** "keep this feature for later, it's not that necessary". Resume from here when wanted; Phase 5's workspaces already accept a `connection` kind.
+
 20. **SSRF guard:** resolve the host and refuse private, loopback, link-local and cloud-metadata addresses; re-check at connect time to defeat DNS rebinding.
 21. **Connection test:** connect with a timeout and a test query, and show the SQL to create a read-only user (recommended).
 22. **Storage:** credentials are encrypted with Fernet (`CREDENTIAL_KEY`) and deleted after 24 hours. They are never logged or returned to the browser.

@@ -37,12 +37,13 @@ export default function SqlPanel({
   params = NO_PARAMS,
   dialect = "PostgreSQL",
   onRerun,
-  onExplain,
+  explanation = null,
   rerunLabel = "Run again",
   animate = true,
 }) {
   const reduced = useReducedMotion();
   const [copied, setCopied] = useState(false);
+  const [explaining, setExplaining] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   // Show (and copy) the bound values in place of %s, so the query is readable
   // and runnable as displayed. The server still sends them as parameters.
@@ -93,9 +94,14 @@ export default function SqlPanel({
               {copied ? <Check size={14} className="text-state-success" /> : <Copy size={14} />}
               {copied ? "Copied" : "Copy"}
             </button>
-            {onExplain && (
-              <button onClick={onExplain} className="btn-ghost">
-                <Sparkles size={14} />
+            {explanation && (
+              <button
+                onClick={() => setExplaining((open) => !open)}
+                className={cn("btn-ghost", explaining && "text-ink")}
+                aria-expanded={explaining}
+                title="What this query does, in plain English"
+              >
+                <Sparkles size={14} className={explaining ? "text-accent-cyan" : undefined} />
                 Explain
               </button>
             )}
@@ -114,6 +120,12 @@ export default function SqlPanel({
               </span>
             )}
           </div>
+          {explanation && explaining && (
+            <p className="border-t border-white/[0.06] px-5 py-3 text-sm leading-relaxed text-ink-dim">
+              <span className="mr-2 font-mono text-[10px] uppercase tracking-[0.18em] text-accent-cyan">In plain English</span>
+              {explanation}
+            </p>
+          )}
         </>
       )}
     </motion.div>

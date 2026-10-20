@@ -3,7 +3,6 @@ import { useLocation, useOutlet } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { SmoothScroll, useScrollTo } from "../../motion/SmoothScroll";
 import Navbar from "../navigation/Navbar";
-import Footer from "../landing/Footer";
 import BootScreen from "../ui/BootScreen";
 
 function ScrollToTopOnEnter() {
@@ -47,8 +46,8 @@ export default function MarketingLayout() {
             transition={{ duration: 0.9, ease: [0.65, 0, 0.35, 1] }}
             aria-hidden="true"
           />
+          {/* No footer: each page ends on its own scene. Privacy is in the navbar. */}
           <Suspense fallback={<BootScreen />}>{outlet}</Suspense>
-          <Footer />
         </motion.div>
       </AnimatePresence>
 

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { animate, motion, useMotionValue } from "framer-motion";
-import { Table2, LineChart as LineChartIcon, Inbox } from "lucide-react";
+import { Download, Table2, LineChart as LineChartIcon, Inbox } from "lucide-react";
 import { cn, formatDuration } from "../../lib/utils";
 import { humanizeColumn } from "../../lib/sqlDisplay";
+import { downloadCsv } from "../../lib/csv";
 import { useReducedMotion } from "../../hooks/useReducedMotion";
 import CountUp from "../../motion/CountUp";
 import ResultsTable from "./ResultsTable";
@@ -58,7 +59,11 @@ function MetricCard({ label, value }) {
 
 const NO_PARAMS = [];
 
-export default function ResultsView({ result, executionMs, params = NO_PARAMS, dialect = "PostgreSQL" }) {
+/**
+ * ``question`` names the CSV file; ``partial`` says when the rows shown are not the
+ * whole answer (a stored result keeps at most 200 rows).
+ */
+export default function ResultsView({ result, executionMs, params = NO_PARAMS, dialect = "PostgreSQL", question = "", partial = null }) {
   const [view, setView] = useState("table");
 
   if (!result || result.rows.length === 0) {
@@ -93,22 +98,36 @@ export default function ResultsView({ result, executionMs, params = NO_PARAMS, d
             .filter(Boolean)
             .join(" · ")}
         </span>
-        {canChart && (
-          <div className="flex overflow-hidden rounded-lg border border-white/[0.08] normal-case tracking-normal">
-            <button
-              onClick={() => setView("table")}
-              className={cn("flex items-center gap-1.5 px-3 py-1.5 text-xs", view === "table" ? "bg-white/[0.08] text-ink" : "text-ink-dim")}
-            >
-              <Table2 size={13} /> Table
-            </button>
-            <button
-              onClick={() => setView("chart")}
-              className={cn("flex items-center gap-1.5 px-3 py-1.5 text-xs", view === "chart" ? "bg-white/[0.08] text-ink" : "text-ink-dim")}
-            >
-              <LineChartIcon size={13} /> Chart
-            </button>
-          </div>
-        )}
+        <div className="flex items-center gap-2 normal-case tracking-normal">
+          <button
+            onClick={() => downloadCsv(columns, rows, question)}
+            className="flex items-center gap-1.5 rounded-lg border border-white/[0.08] px-3 py-1.5 text-xs text-ink-dim transition-colors hover:bg-white/[0.05] hover:text-ink"
+            title={
+              result.truncated
+                ? `Downloads the ${rows.length.toLocaleString("en")} rows shown; the full result has more.`
+                : partial || `Downloads all ${rows.length.toLocaleString("en")} rows as CSV`
+            }
+          >
+            <Download size={13} />
+            CSV{result.truncated ? ` (first ${rows.length.toLocaleString("en")} rows)` : partial ? " (stored rows)" : ""}
+          </button>
+          {canChart && (
+            <div className="flex overflow-hidden rounded-lg border border-white/[0.08]">
+              <button
+                onClick={() => setView("table")}
+                className={cn("flex items-center gap-1.5 px-3 py-1.5 text-xs", view === "table" ? "bg-white/[0.08] text-ink" : "text-ink-dim")}
+              >
+                <Table2 size={13} /> Table
+              </button>
+              <button
+                onClick={() => setView("chart")}
+                className={cn("flex items-center gap-1.5 px-3 py-1.5 text-xs", view === "chart" ? "bg-white/[0.08] text-ink" : "text-ink-dim")}
+              >
+                <LineChartIcon size={13} /> Chart
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {single && onlyValue === null ? (

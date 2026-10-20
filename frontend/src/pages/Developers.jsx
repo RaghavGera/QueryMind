@@ -20,6 +20,7 @@ const RESPONSE = `{
     "The question asks for a single answer, so only the top result is shown.",
     "Sales count completed orders only; pending and cancelled orders are excluded."
   ],
+  "explanation": "Adds up quantity × unit price for each country, only where status is Completed, highest first, and shows the top result.",
   "clarification_questions": [],
   "error_message": null,
   "has_ambiguities": false,

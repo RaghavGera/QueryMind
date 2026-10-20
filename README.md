@@ -231,14 +231,13 @@ Full details are in [SETUP.md](SETUP.md#request-options-for-post-query).
 - Google sign-in with daily question limits;
 - history and saved queries in the account;
 - read-only transactions, query timeouts and row caps;
-- upload your own CSV/Excel data, with an editable preview and a private, read-only workspace.
+- upload your own CSV/Excel data, with an editable preview and a private, read-only workspace;
+- plain-English explanations of each query, and CSV export of every result.
 
 **Next:** product hardening.
 - connect your own PostgreSQL (read-only);
 - API keys for programmatic access;
 - a query audit log with usage analytics;
-- plain-English explanations of generated SQL;
-- CSV export;
 - continuous integration with a nightly live evaluation.
 
 ## Contributing

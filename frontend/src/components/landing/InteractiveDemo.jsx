@@ -17,7 +17,7 @@ import { pipelineStagesInitial, pipelineStagesAfterClarification, suggestedQuest
 export default function InteractiveDemo() {
   const { status: authStatus } = useAuth();
   const usage = useUsage();
-  const { status, startedAt, clarification, selectedChoice, sql, params, result, executionMs, warnings, error, ask, selectClarification, reset } =
+  const { status, question, startedAt, clarification, selectedChoice, sql, params, result, executionMs, warnings, explanation, error, ask, selectClarification, reset } =
     useQueryPipeline();
   const busy = status === "processing" || status === "generating";
   const signedIn = authStatus === "signedIn";
@@ -68,8 +68,8 @@ export default function InteractiveDemo() {
               ))}
             </ul>
           )}
-          <SqlPanel sql={sql} params={params} onRerun={reset} rerunLabel="Ask another" />
-          <ResultsView result={result} executionMs={executionMs} params={params} />
+          <SqlPanel sql={sql} params={params} onRerun={reset} rerunLabel="Ask another" explanation={explanation} />
+          <ResultsView result={result} executionMs={executionMs} params={params} question={question} />
         </div>
       )}
     </div>

@@ -617,6 +617,13 @@ The harness uploads the folder as that account's workspace (replacing it),
 asks every question, then deletes the workspace. A request with both the
 service key and a session acts as that user without counting questions.
 
+## Explanations
+
+A successful answer includes `explanation`: one plain-English sentence describing the query,
+built by `app/explain.py` from the final intent the SQL was generated from (after automatic
+fixes), so it always matches the SQL and needs no model call. The frontend shows it behind the
+SQL panel's Explain button and stores it with history and saved queries.
+
 ## Request options for `POST /query`
 
 | Field | Default | Meaning |

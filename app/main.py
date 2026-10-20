@@ -42,6 +42,7 @@ from app.auth import (
 )
 from app import writes
 from app import uploads
+from app.explain import explain_intent
 from app.workspaces import DEMO, DEMO_ID, SchemaCache, ScopedDatabase, Workspace, WorkspaceError, WorkspaceStore
 from app.database import Database, QueryTimeoutError, WriteConflictError, get_db, init_db, max_result_rows
 from app.intent_converter import IntentConversionError, convert_query_intent
@@ -896,6 +897,13 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
             if rows
             else []
         )
+
+        # What the SQL does, in plain English, from the same intent (no model call).
+        if generated.intent is not None:
+            try:
+                payload["explanation"] = explain_intent(generated.intent, schema)
+            except Exception:
+                logger.exception("Could not explain the query")
 
         truncated = len(rows) > cap
         payload["result"] = {

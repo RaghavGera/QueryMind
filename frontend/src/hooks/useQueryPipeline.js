@@ -30,6 +30,7 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
   const [executionMs, setExecutionMs] = useState(null);
   const [error, setError] = useState(null);
   const [warnings, setWarnings] = useState([]);
+  const [explanation, setExplanation] = useState(null);
   const [confirmation, setConfirmation] = useState(null);
   const [writeResult, setWriteResult] = useState(null);
   // Set when a stored result is shown instead of a fresh run.
@@ -95,6 +96,7 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
 
       setWarnings(response.warnings || []);
       setSql(response.sql || null);
+      setExplanation(response.explanation || null);
       setParams(response.params || []);
       setResult(finalResult);
       setExecutionMs(durationMs);
@@ -106,6 +108,7 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
         status: "success",
         durationMs,
         snapshot: makeSnapshot({
+          explanation: response.explanation,
           sql: response.sql,
           params: response.params,
           result: finalResult,
@@ -129,6 +132,7 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
     setClarification(null);
     setSelectedChoice(null);
     setSql(null);
+    setExplanation(null);
     setParams([]);
     setResult(null);
     setExecutionMs(null);
@@ -157,6 +161,7 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
       setClarification(null);
       setSelectedChoice(clarification);
       setSql(null);
+      setExplanation(null);
       setParams([]);
       setResult(null);
       setExecutionMs(null);
@@ -246,6 +251,7 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
     setError(null);
     setStartedAt(null);
     setWarnings(snapshot.warnings || []);
+    setExplanation(snapshot.explanation || null);
     setSql(snapshot.sql);
     setParams(snapshot.params || []);
     setResult({ columns: snapshot.columns, rows: snapshot.rows });
@@ -272,6 +278,7 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
     executionMs,
     error,
     warnings,
+    explanation,
     confirmation,
     writeResult,
     restored,

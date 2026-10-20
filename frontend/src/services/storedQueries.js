@@ -14,7 +14,7 @@ export function newId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function makeSnapshot({ sql, params, result, warnings }) {
+export function makeSnapshot({ sql, params, result, warnings, explanation }) {
   const rows = result?.rows || [];
   return {
     sql: sql || null,
@@ -23,6 +23,7 @@ export function makeSnapshot({ sql, params, result, warnings }) {
     rows: rows.slice(0, MAX_SNAPSHOT_ROWS),
     totalRows: rows.length,
     warnings: warnings || [],
+    explanation: explanation || null,
   };
 }
 

@@ -12,6 +12,7 @@ const links = [
   { to: "/product", label: "Product" },
   { to: "/architecture", label: "How it works" },
   { to: "/developers", label: "Developers" },
+  { to: "/privacy", label: "Privacy" },
 ];
 
 export default function Navbar() {

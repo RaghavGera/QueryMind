@@ -66,6 +66,7 @@ function Dashboard({ activeId }) {
     executionMs,
     error,
     warnings,
+    explanation,
     confirmation,
     writeResult,
     restored,
@@ -313,8 +314,18 @@ function Dashboard({ activeId }) {
                   ))}
                 </ul>
               )}
-              <SqlPanel sql={sql} params={params} onRerun={rerun} />
-              <ResultsView result={result} executionMs={executionMs} params={params} />
+              <SqlPanel sql={sql} params={params} onRerun={rerun} explanation={explanation} />
+              <ResultsView
+                result={result}
+                executionMs={executionMs}
+                params={params}
+                question={question}
+                partial={
+                  restored && restored.totalRows > restored.shownRows
+                    ? `A stored result keeps ${restored.shownRows.toLocaleString("en")} of its ${restored.totalRows.toLocaleString("en")} rows; Run again for all of them.`
+                    : null
+                }
+              />
             </div>
           )}
         </div>

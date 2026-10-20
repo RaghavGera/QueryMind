@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Explain:** every answer's SQL panel has an Explain button with a plain-English description of
+  what the query does ("Adds up quantity × unit price for each country, only where status is
+  Completed, highest first, and shows the top result."). Built from the same intent the SQL came
+  from, with no model call, so it costs nothing and can't describe something the SQL doesn't do;
+  wording follows column types (numbers "highest first", dates "after", text "A to Z"). The API
+  returns it as `explanation`; history and saved queries keep it.
+- **CSV export:** a CSV button on every result downloads exactly the rows shown, named after the
+  question, UTF-8 with a BOM for Excel, RFC 4180 quoting, and cells that start with `= + - @`
+  prefixed with an apostrophe so a spreadsheet can't run them as formulas. Capped answers say
+  "first 1,000 rows"; stored results say they hold only the stored rows.
 - **Upload your own data (Phase 5).** A **Your Data** page takes CSV or Excel files (10 files,
   10 MB, 200,000 rows per table), shows an editable preview (types checked against every value,
   clean names, keys, links kept only when every value matches, day-first dates flagged and
@@ -158,6 +168,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/KNOWN_ISSUES.md`: observed behaviour per question, owner actions, open gaps.
 
 ### Changed
+- The public pages no longer have a footer: each page ends on its own scene (the landing page on the
+  starfield). The Privacy link moved into the navbar.
 - **Sales count completed orders only.** Revenue, sales, spending and "units sold" questions over
   order line items now add `orders.status = 'Completed'` (pending and cancelled orders are not
   sales), unless the question names a status itself. Every affected answer carries the warning
