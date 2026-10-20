@@ -11,7 +11,8 @@ const REQUEST = `curl -X POST ${BASE_URL}/query \\
   -H "Content-Type: application/json" \\
   -d '{"question": "Which region generated the most revenue?"}'`;
 
-// The real response, captured from POST /query on 2026-10-19 (demo database).
+// The real response, captured from POST /query on 2026-10-19 (demo database);
+// intent_token and tweaks captured on 2026-10-20 (the token is shortened here).
 const RESPONSE = `{
   "status": "success",
   "sql": "SELECT \\"customers\\".\\"country\\", SUM(\\"order_items\\".\\"quantity\\" * \\"order_items\\".\\"unit_price\\") AS ... WHERE LOWER(\\"orders\\".\\"status\\") = LOWER(%s) ... LIMIT 1",
@@ -21,6 +22,13 @@ const RESPONSE = `{
     "Sales count completed orders only; pending and cancelled orders are excluded."
   ],
   "explanation": "Adds up quantity × unit price for each country, only where status is Completed, highest first, and shows the top result.",
+  "intent_token": "eNqVlN9r2zAQ...(756 characters, signed)",
+  "tweaks": [
+    { "id": "agg:0", "kind": "aggregate", "label": "quantity × unit price", "type": "number", "value": "SUM", "options": ["MAX", "MIN", "AVG", "SUM", "COUNT"] },
+    { "id": "sort", "kind": "sort", "label": "the total of quantity × unit price", "type": "number", "value": "desc", "options": ["desc", "asc"] },
+    { "id": "limit", "kind": "limit", "label": "rows", "value": 1, "min": 1, "max": 1000 },
+    { "id": "where:0", "kind": "filter", "label": "status", "type": "text", "operator": "=", "operators": ["=", "!="], "value": "Completed" }
+  ],
   "clarification_questions": [],
   "error_message": null,
   "has_ambiguities": false,
@@ -32,6 +40,7 @@ const RESPONSE = `{
 
 const ENDPOINTS = [
   { method: "POST", path: "/query", detail: "Ask a question. Returns the SQL, its parameters and the rows, or the clarification questions it needs answered." },
+  { method: "POST", path: "/query/tweak", detail: "Adjust an answer without asking again: send its intent_token and changes such as {\"agg:0\": \"MIN\", \"sort\": \"asc\", \"limit\": 25}. The SQL is rebuilt from the signed plan with no model call, so it doesn't use a question." },
   { method: "POST", path: "/query/confirm", detail: "Run a previewed insert/update with its single-use confirmation token (only when writes are enabled on the server)." },
   { method: "GET", path: "/schema", detail: "The live schema: tables, columns, primary and foreign keys, and the database name." },
   { method: "GET", path: "/health", detail: "Database connectivity, and whether writes are enabled on this server." },

@@ -19,6 +19,7 @@ import ClarificationPanel from "../components/clarification/ClarificationPanel";
 import ConfirmationPanel from "../components/clarification/ConfirmationPanel";
 import SqlPanel from "../components/sql/SqlPanel";
 import ResultsView from "../components/results/ResultsView";
+import TweakBar from "../components/sql/TweakBar";
 import { AlertTriangle, Bookmark, BookmarkCheck, CheckCircle2, History, Info } from "lucide-react";
 import {
   suggestedQuestions,
@@ -70,7 +71,14 @@ function Dashboard({ activeId }) {
     confirmation,
     writeResult,
     restored,
+    intentToken,
+    tweaks,
+    adjusted,
+    tweaking,
+    tweakError,
     ask,
+    tweak,
+    rerunPlan,
     confirm,
     selectClarification,
     reset,
@@ -135,7 +143,7 @@ function Dashboard({ activeId }) {
     };
   }, [searchParams, setSearchParams, restore, reset]);
 
-  const savedEntry = status === "done" ? library.findSavedQuery({ question, resolved: selectedChoice }) : null;
+  const savedEntry = status === "done" ? library.findSavedQuery({ question, resolved: selectedChoice, adjusted }) : null;
 
   const submit = (q) => {
     setNotice(null);
@@ -149,15 +157,23 @@ function Dashboard({ activeId }) {
     reset();
   };
 
-  const rerun = () => ask(question, { clarification: selectedChoice });
+  // An adjusted answer re-runs its own plan (still no AI call); otherwise ask again.
+  const rerun = () => (adjusted && intentToken ? rerunPlan() : ask(question, { clarification: selectedChoice }));
 
   const toggleSave = () => {
     const done = savedEntry
       ? library.removeSaved(savedEntry.id)
       : (() => {
-          const snapshot = makeSnapshot({ sql, params, result, warnings });
+          const snapshot = makeSnapshot({ sql, params, result, warnings, explanation, intentToken, tweaks });
           if (restored) snapshot.totalRows = restored.totalRows; // rows were already capped
-          return library.save({ question, resolved: selectedChoice, durationMs: executionMs, snapshot, workspaceId: activeId });
+          return library.save({
+            question,
+            resolved: selectedChoice,
+            adjusted,
+            durationMs: executionMs,
+            snapshot,
+            workspaceId: activeId,
+          });
         })();
     done.catch((e) => setNotice(e.message));
   };
@@ -213,6 +229,9 @@ function Dashboard({ activeId }) {
               </p>
               {status === "done" && selectedChoice && (
                 <p className="mt-1 text-sm text-ink-dim">Clarified: {selectedChoice}</p>
+              )}
+              {status === "done" && adjusted && (
+                <p className="mt-1 text-sm text-ink-dim">Adjusted: {adjusted}</p>
               )}
             </div>
             <div className="flex shrink-0 items-center gap-1">
@@ -299,7 +318,7 @@ function Dashboard({ activeId }) {
                         ` Showing the first ${restored.shownRows} of ${restored.totalRows} rows.`}
                     </span>
                   </span>
-                  <button onClick={rerun} className="btn-ghost shrink-0">
+                  <button onClick={rerun} disabled={tweaking} className="btn-ghost shrink-0 disabled:opacity-50">
                     Run again
                   </button>
                 </div>
@@ -314,7 +333,17 @@ function Dashboard({ activeId }) {
                   ))}
                 </ul>
               )}
-              <SqlPanel sql={sql} params={params} onRerun={rerun} explanation={explanation} />
+              <SqlPanel sql={sql} params={params} onRerun={tweaking ? undefined : rerun} explanation={explanation} />
+              {tweaks.length > 0 && intentToken ? (
+                <TweakBar key={intentToken} controls={tweaks} onRun={tweak} busy={tweaking} error={tweakError} />
+              ) : (
+                tweakError && (
+                  <p role="alert" className="flex items-start gap-2 text-sm text-state-danger">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                    {tweakError}
+                  </p>
+                )
+              )}
               <ResultsView
                 result={result}
                 executionMs={executionMs}

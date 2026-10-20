@@ -170,7 +170,7 @@ Tests that spend LLM tokens are opt-in: `python -m testing.run_tests --live`.
 
 ```
 app/                  FastAPI backend
-  main.py             endpoints: /query, /query/confirm, /schema, /health
+  main.py             endpoints: /query, /query/tweak, /query/confirm, /schema, /health
   intent_extractor.py LLM intent extraction, provider failover, prompt trimming
   openai_client.py    provider chain configuration
   intent_converter.py intent normalization and validation
@@ -178,6 +178,8 @@ app/                  FastAPI backend
   sql_generator.py    parameterized SQL generation and join planning
   schema.py           live schema introspection
   writes.py           write previews and confirmation tokens
+  explain.py          plain-English explanation of each query (no model call)
+  tweaks.py           quick tweaks: signed plans and the changes they allow
 frontend/             React app (public site + /app)
   src/components/universe/   WebGL scene
   src/components/landing/    scroll-driven chapters
@@ -192,6 +194,7 @@ docs/                 known issues and phase documentation
 | Endpoint | Purpose |
 |---|---|
 | `POST /query` | Ask a question; returns SQL, parameters and rows, or clarification questions |
+| `POST /query/tweak` | Adjust an answer (function, sort, rows, filter values) from its signed plan; no model call, no question used |
 | `POST /query/confirm` | Execute a previewed insert or update with its confirmation token |
 | `GET /schema` | The live schema: tables, columns, keys and the database name |
 | `GET /health` | Database connectivity, and whether writes are enabled |
@@ -232,7 +235,8 @@ Full details are in [SETUP.md](SETUP.md#request-options-for-post-query).
 - history and saved queries in the account;
 - read-only transactions, query timeouts and row caps;
 - upload your own CSV/Excel data, with an editable preview and a private, read-only workspace;
-- plain-English explanations of each query, and CSV export of every result.
+- plain-English explanations of each query, and CSV export of every result;
+- quick tweaks: change an answer's function, sort, row count or filter values and re-run it without another AI call.
 
 **Next:** product hardening.
 - connect your own PostgreSQL (read-only);

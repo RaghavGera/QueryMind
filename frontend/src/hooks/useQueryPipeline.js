@@ -1,12 +1,26 @@
 import { useCallback, useRef, useState } from "react";
-import { confirmWrite, submitQuestion } from "../services/queryApi";
+import { confirmWrite, submitQuestion, tweakAnswer } from "../services/queryApi";
 import { makeSnapshot } from "../services/storedQueries";
+import { joinAdjusted } from "../lib/tweaks.js";
 
 /** Resolve to [value, elapsed ms] -- the backend does not report its own timing. */
 async function timed(promise) {
   const started = performance.now();
   const value = await promise;
   return [value, Math.round(performance.now() - started)];
+}
+
+/** Stored with history and saved entries: the answer plus its tweak controls. */
+function snapshotOf(response, finalResult) {
+  return makeSnapshot({
+    explanation: response.explanation,
+    sql: response.sql,
+    params: response.params,
+    result: finalResult,
+    warnings: response.warnings,
+    intentToken: response.intent_token,
+    tweaks: response.tweaks,
+  });
 }
 
 /*
@@ -35,6 +49,12 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
   const [writeResult, setWriteResult] = useState(null);
   // Set when a stored result is shown instead of a fresh run.
   const [restored, setRestored] = useState(null);
+  // Quick tweaks: the signed plan, the controls it offers, and what was changed so far.
+  const [intentToken, setIntentToken] = useState(null);
+  const [tweaks, setTweaks] = useState([]);
+  const [adjusted, setAdjusted] = useState(null);
+  const [tweaking, setTweaking] = useState(false);
+  const [tweakError, setTweakError] = useState(null);
 
   const runToken = useRef({ token: 0 });
 
@@ -69,6 +89,19 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
     return false;
   }, []);
 
+  /** Show a successful answer (from /query or /query/tweak). */
+  const showAnswer = useCallback((response, finalResult, durationMs) => {
+    setWarnings(response.warnings || []);
+    setSql(response.sql || null);
+    setExplanation(response.explanation || null);
+    setParams(response.params || []);
+    setResult(finalResult);
+    setExecutionMs(durationMs);
+    setIntentToken(response.intent_token || null);
+    setTweaks(response.tweaks || []);
+    setTweakError(null);
+  }, []);
+
   /** Apply a /query response: result, clarification, confirmation or error. */
   const handleResponse = useCallback(
     (response, elapsedMs, askedQuestion, resolved) => {
@@ -94,12 +127,8 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
       const finalResult = response.result || { columns: [], rows: [] };
       const durationMs = response.execution_ms ?? elapsedMs;
 
-      setWarnings(response.warnings || []);
-      setSql(response.sql || null);
-      setExplanation(response.explanation || null);
-      setParams(response.params || []);
-      setResult(finalResult);
-      setExecutionMs(durationMs);
+      showAnswer(response, finalResult, durationMs);
+      setAdjusted(null);
       setStatus("done");
 
       onComplete?.({
@@ -107,17 +136,19 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
         resolved,
         status: "success",
         durationMs,
-        snapshot: makeSnapshot({
-          explanation: response.explanation,
-          sql: response.sql,
-          params: response.params,
-          result: finalResult,
-          warnings: response.warnings,
-        }),
+        snapshot: snapshotOf(response, finalResult),
       });
     },
-    [handleSpecialStatus, onComplete],
+    [handleSpecialStatus, showAnswer, onComplete],
   );
+
+  const clearTweaks = useCallback(() => {
+    setIntentToken(null);
+    setTweaks([]);
+    setAdjusted(null);
+    setTweaking(false);
+    setTweakError(null);
+  }, []);
 
   const reset = useCallback(() => {
     runToken.current.token += 1;
@@ -126,6 +157,7 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
     setConfirmation(null);
     setWriteResult(null);
     setRestored(null);
+    clearTweaks();
     setStatus("idle");
     setQuestion("");
     setStartedAt(null);
@@ -137,7 +169,7 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
     setResult(null);
     setExecutionMs(null);
     setError(null);
-  }, []);
+  }, [clearTweaks]);
 
   /*
    * ``clarification`` re-sends a previously given clarification answer, so
@@ -158,6 +190,7 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
       setConfirmation(null);
       setWriteResult(null);
       setRestored(null);
+      clearTweaks();
       setClarification(null);
       setSelectedChoice(clarification);
       setSql(null);
@@ -177,7 +210,7 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
         setStatus("error");
       }
     },
-    [handleResponse, workspaceId],
+    [handleResponse, clearTweaks, workspaceId],
   );
 
   const selectClarification = useCallback(
@@ -256,6 +289,11 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
     setParams(snapshot.params || []);
     setResult({ columns: snapshot.columns, rows: snapshot.rows });
     setExecutionMs(entry.durationMs ?? null);
+    setIntentToken(snapshot.intentToken || null);
+    setTweaks(snapshot.tweaks || []);
+    setAdjusted(entry.adjusted || null);
+    setTweaking(false);
+    setTweakError(null);
     setRestored({
       source,
       at: entry.executedAt || entry.savedAt || null,
@@ -265,6 +303,52 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
     setStatus("done");
     return true;
   }, []);
+
+  /*
+   * Quick tweaks: re-run this answer's checked plan with small changes (or as
+   * it is, with ``rerun``). No model call and no question used; the old answer
+   * stays on screen until the new one arrives, and stays if it fails.
+   */
+  const runPlan = useCallback(
+    async ({ changes = {}, rerun = false } = {}) => {
+      if (!intentToken || tweaking) return;
+
+      runToken.current.token += 1;
+      const token = runToken.current.token;
+      setTweaking(true);
+      setTweakError(null);
+
+      try {
+        const [response, elapsedMs] = await timed(tweakAnswer(intentToken, changes, { rerun }));
+        if (runToken.current.token !== token) return;
+        const finalResult = response.result || { columns: [], rows: [] };
+        const durationMs = response.execution_ms ?? elapsedMs;
+        const nowAdjusted = joinAdjusted(adjusted, response.adjusted);
+
+        showAnswer(response, finalResult, durationMs);
+        setAdjusted(nowAdjusted);
+        setRestored(null);
+        setTweaking(false);
+
+        onComplete?.({
+          question,
+          resolved: selectedChoice,
+          adjusted: nowAdjusted,
+          status: "success",
+          durationMs,
+          snapshot: snapshotOf(response, finalResult),
+        });
+      } catch (e) {
+        if (runToken.current.token !== token) return;
+        setTweakError(e?.message || "Could not communicate with the QueryMind backend.");
+        setTweaking(false);
+      }
+    },
+    [intentToken, tweaking, adjusted, question, selectedChoice, showAnswer, onComplete],
+  );
+
+  const tweak = useCallback((changes) => runPlan({ changes }), [runPlan]);
+  const rerunPlan = useCallback(() => runPlan({ rerun: true }), [runPlan]);
 
   return {
     status,
@@ -282,8 +366,15 @@ export function useQueryPipeline({ onComplete, workspaceId = null } = {}) {
     confirmation,
     writeResult,
     restored,
+    intentToken,
+    tweaks,
+    adjusted,
+    tweaking,
+    tweakError,
 
     ask,
+    tweak,
+    rerunPlan,
     confirm,
     selectClarification,
     reset,

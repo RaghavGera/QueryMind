@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Quick tweaks:** every SELECT/COUNT/aggregate answer has an *Adjust this answer* bar with the
+  changes its plan allows: the function (Highest / Lowest / Average / Total / Count), the sort
+  (wording by type: highest/lowest, newest/oldest, A to Z), the number of rows (1 to 1,000), and
+  filter values and comparisons. **Run** rebuilds the SQL on the server from the answer's
+  signed, already-checked plan with no model call, so it doesn't use a question; the browser
+  never sends SQL or a plan of its own. `POST /query/tweak` (with `rerun` for "Run again" on an
+  adjusted answer); answers carry `intent_token` and `tweaks`, tweaked ones `adjusted`. Runs
+  have their own daily count (`TWEAK_DAILY_LIMIT` 200 / `ANON_TWEAK_DAILY_LIMIT` 50), refunded
+  when nothing ran. The page shows "Adjusted: AVG instead of MAX of price" (successive changes
+  fold into the net difference); history and saved entries keep it, a reopened entry can still
+  be adjusted, and an adjusted answer can be saved next to its original.
 - **Explain:** every answer's SQL panel has an Explain button with a plain-English description of
   what the query does ("Adds up quantity × unit price for each country, only where status is
   Completed, highest first, and shows the top result."). Built from the same intent the SQL came

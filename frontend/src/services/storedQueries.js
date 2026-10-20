@@ -14,7 +14,7 @@ export function newId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function makeSnapshot({ sql, params, result, warnings, explanation }) {
+export function makeSnapshot({ sql, params, result, warnings, explanation, intentToken, tweaks }) {
   const rows = result?.rows || [];
   return {
     sql: sql || null,
@@ -24,12 +24,19 @@ export function makeSnapshot({ sql, params, result, warnings, explanation }) {
     totalRows: rows.length,
     warnings: warnings || [],
     explanation: explanation || null,
+    // The signed plan and its controls: a reopened answer can still be tweaked.
+    intentToken: intentToken || null,
+    tweaks: tweaks || [],
   };
 }
 
-/** Same question + same clarification answer = same query. */
+/** Same question + same clarification answer + same tweaks = same query. */
 export function sameQuery(a, b) {
-  return a.question === b.question && (a.resolved || null) === (b.resolved || null);
+  return (
+    a.question === b.question &&
+    (a.resolved || null) === (b.resolved || null) &&
+    (a.adjusted || null) === (b.adjusted || null)
+  );
 }
 
 export function readList(key) {

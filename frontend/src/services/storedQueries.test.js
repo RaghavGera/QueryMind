@@ -53,6 +53,22 @@ test("same question with a different clarification is a different query", () => 
   assert.ok(!sameQuery({ question: "q", resolved: "by revenue" }, { question: "q", resolved: null }));
 });
 
+test("an adjusted answer is a different query from the original", () => {
+  assert.ok(sameQuery({ question: "q", adjusted: null }, { question: "q" }));
+  assert.ok(!sameQuery({ question: "q", adjusted: "lowest first" }, { question: "q" }));
+  assert.ok(sameQuery({ question: "q", adjusted: "lowest first" }, { question: "q", adjusted: "lowest first" }));
+});
+
+test("snapshots keep the plan token and controls so a reopened answer can be adjusted", () => {
+  const tweaks = [{ id: "sort", kind: "sort", value: "desc" }];
+  const snap = makeSnapshot({ sql: "SELECT 1", result: { columns: ["a"], rows: [{ a: 1 }] }, intentToken: "t.s", tweaks });
+  assert.equal(snap.intentToken, "t.s");
+  assert.deepEqual(snap.tweaks, tweaks);
+  const old = makeSnapshot({ sql: "SELECT 1", result: { columns: [], rows: [] } });
+  assert.equal(old.intentToken, null);
+  assert.deepEqual(old.tweaks, []);
+});
+
 test("readList survives missing or corrupt storage", () => {
   assert.deepEqual(readList("nothing"), []);
   localStorage.setItem("bad", "{not json");

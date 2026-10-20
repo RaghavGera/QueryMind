@@ -141,3 +141,13 @@ def test_import_skips_what_the_account_already_has(store):
     assert added == {"history": 1, "saved": 1}
     assert [e["id"] for e in s.history(user.id)] == ["q-2", "q-1"]
     assert sorted(e["id"] for e in s.saved(user.id)) == ["q-5", "q-7"]
+
+
+def test_a_tweaked_answer_is_saved_next_to_the_original(store):
+    s, tag = store
+    user = s.upsert_google_user(f"{tag}-sub", "ada@example.com", None, None)
+    assert s.save_query(user.id, _entry(1, "Priciest category"))
+    assert s.save_query(user.id, {**_entry(2, "Priciest category"), "adjusted": "MIN instead of MAX of price"})
+    assert sorted(e["id"] for e in s.saved(user.id)) == ["q-1", "q-2"], "the tweak doesn't replace the original"
+    assert s.save_query(user.id, {**_entry(3, "Priciest category"), "adjusted": "MIN instead of MAX of price"})
+    assert sorted(e["id"] for e in s.saved(user.id)) == ["q-1", "q-3"], "the same tweak again replaces it"

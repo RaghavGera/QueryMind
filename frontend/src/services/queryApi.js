@@ -201,3 +201,11 @@ export function importUpload(files, { plan, name, replace }) {
     body: uploadForm(files, { plan, name: name || "", replace: replace ? "true" : "false" }),
   });
 }
+
+/** Re-run an answer with quick tweaks applied to its signed plan (no model call; see app/tweaks.py). */
+export function tweakAnswer(intentToken, changes = {}, { rerun = false } = {}) {
+  return request("/query/tweak", {
+    method: "POST",
+    body: JSON.stringify({ intent_token: intentToken, changes, rerun }),
+  });
+}

@@ -41,7 +41,7 @@ from app.auth import (
     verify_google_id_token,
 )
 from app import writes
-from app import uploads
+from app import tweaks, uploads
 from app.explain import explain_intent
 from app.workspaces import DEMO, DEMO_ID, SchemaCache, ScopedDatabase, Workspace, WorkspaceError, WorkspaceStore
 from app.database import Database, QueryTimeoutError, WriteConflictError, get_db, init_db, max_result_rows
@@ -866,62 +866,73 @@ def _run_pipeline(question: str, request: QueryRequest, db: Database):
         return _prepare_write(structured_intent, generated, generator, payload, db, request.allow_writes)
 
     if succeeded:
-        logger.debug("Generated SQL: %s | params: %r", generated.sql, generated.params)
-        cap = max_result_rows()
-        try:
-            rows = db.execute_query(
-                generated.sql,
-                tuple(generated.params),
-                max_rows=cap,
-            )
-        except QueryTimeoutError as exc:
-            # 504, so the question is given back (the usage middleware refunds 5xx).
-            return _error_response(
-                504,
-                f"{exc} Try a narrower question, for example with a filter or a smaller time range.",
-                sql=generated.sql,
-                params=generated.params,
-            )
-        except Exception as exc:
-            return {
-                "status": "error",
-                "error": "Generated SQL could not be executed.",
-                "details": str(exc),
-                "sql": generated.sql,
-                "params": generated.params,
-                "result": {"columns": [], "rows": []},
-            }
+        return _execute_answer(generated, payload, db, schema)
 
-        columns = (
-            list(rows[0].keys())
-            if rows
-            else []
+    payload["result"] = {"columns": [], "rows": []}
+    return payload
+
+
+def _execute_answer(generated, payload: dict, db, schema: DatabaseSchema):
+    """
+    Run a generated SELECT and finish the answer: rows (capped), the
+    plain-English explanation, and the signed plan that quick tweaks change.
+    Shared by /query and /query/tweak, so both answer exactly the same way.
+    """
+    logger.debug("Generated SQL: %s | params: %r", generated.sql, generated.params)
+    cap = max_result_rows()
+    try:
+        rows = db.execute_query(
+            generated.sql,
+            tuple(generated.params),
+            max_rows=cap,
         )
+    except QueryTimeoutError as exc:
+        # 504, so the question is given back (the usage middleware refunds 5xx).
+        return _error_response(
+            504,
+            f"{exc} Try a narrower question, for example with a filter or a smaller time range.",
+            sql=generated.sql,
+            params=generated.params,
+        )
+    except Exception as exc:
+        return {
+            "status": "error",
+            "error": "Generated SQL could not be executed.",
+            "details": str(exc),
+            "sql": generated.sql,
+            "params": generated.params,
+            "result": {"columns": [], "rows": []},
+        }
 
+    columns = list(rows[0].keys()) if rows else []
+
+    if generated.intent is not None:
         # What the SQL does, in plain English, from the same intent (no model call).
-        if generated.intent is not None:
+        try:
+            payload["explanation"] = explain_intent(generated.intent, schema)
+        except Exception:
+            logger.exception("Could not explain the query")
+        # The checked plan, signed, so the answer can be adjusted without the model.
+        if generated.intent.query_type in tweaks.TWEAKABLE_TYPES:
+            workspace_id = db.workspace.id if isinstance(db, ScopedDatabase) else DEMO_ID
             try:
-                payload["explanation"] = explain_intent(generated.intent, schema)
+                token = tweaks.sign_plan(generated.intent, workspace_id)
+                if token:
+                    payload["intent_token"] = token
+                    payload["tweaks"] = tweaks.describe(generated.intent, schema)
             except Exception:
-                logger.exception("Could not explain the query")
+                logger.exception("Could not offer tweaks for this answer")
 
-        truncated = len(rows) > cap
-        payload["result"] = {
-            "columns": columns,
-            "rows": rows[:cap],
-            "truncated": truncated,
-        }
-        if truncated:
-            payload["warnings"] = list(payload.get("warnings", [])) + [
-                f"Showing the first {cap:,} rows; the full result has more. Add a filter or a limit to see the rest."
-            ]
-
-    else:
-        payload["result"] = {
-            "columns": [],
-            "rows": [],
-        }
-
+    truncated = len(rows) > cap
+    payload["result"] = {
+        "columns": columns,
+        "rows": rows[:cap],
+        "truncated": truncated,
+    }
+    if truncated:
+        payload["warnings"] = list(payload.get("warnings", [])) + [
+            f"Showing the first {cap:,} rows; the full result has more. Add a filter or a limit to see the rest."
+        ]
     return payload
 
 
@@ -985,6 +996,69 @@ def _prepare_write(intent, generated, generator, payload: dict, db: Database, al
 
 class ConfirmRequest(BaseModel):
     confirmation_token: str
+
+
+class TweakRequest(BaseModel):
+    intent_token: str
+    changes: dict = {}
+    # Run the plan as it is ("Run again" on an adjusted answer): still no model call.
+    rerun: bool = False
+
+
+def tweak_daily_limit(principal: Principal) -> int:
+    """Adjusted runs per UTC day: no model call, but each one is a database query."""
+    if principal.kind == "user":
+        return _int_env("TWEAK_DAILY_LIMIT", 200)
+    return _int_env("ANON_TWEAK_DAILY_LIMIT", 50)
+
+
+@app.post("/query/tweak")
+def tweak_answer(body: TweakRequest, http_request: Request, db: Database = Depends(get_db)):
+    """
+    Re-run an answer with small changes (aggregate, sort, limit, filter values)
+    applied to its signed plan. No model call, so it doesn't use a question.
+    """
+    try:
+        store = get_account_store()
+        principal = resolve_principal(http_request, store)
+    except AuthError as exc:
+        return _auth_error(exc)
+    try:
+        intent, workspace_id = tweaks.read_plan(body.intent_token)
+        workspace = _workspace_for(principal, workspace_id)
+    except tweaks.TweakError as exc:
+        return _error_response(exc.status, str(exc))
+    except WorkspaceError as exc:
+        return _workspace_error(exc)
+
+    target = _scoped(db, workspace)
+    try:
+        schema = _introspect(target)
+        changed, summary = (intent, []) if body.rerun else tweaks.apply(intent, body.changes, schema)
+    except tweaks.TweakError as exc:
+        return _error_response(exc.status, str(exc))
+
+    counter = None if principal.kind == "service" else f"runs:{principal.subject}"
+    if counter:
+        limit = tweak_daily_limit(principal)
+        if store.try_consume(counter, limit) is None:
+            return _error_response(429, f"That's {limit} adjusted runs today; they reset at 00:00 UTC.")
+
+    generator = SQLGenerator(schema, AmbiguityDetector(schema, demo=workspace.is_demo), strict=False)
+    generated = generator.generate(changed)
+    if generated.status.value not in {"success", "success_with_warnings"} or not generated.sql:
+        if counter:
+            store.refund(counter)  # nothing ran
+        return _error_response(
+            422, "That change can't be run as it is; ask it as a new question instead.",
+            details=generated.error_message or "; ".join(generated.clarification_questions),
+        )
+    payload = generated.to_dict()
+    payload["adjusted"] = summary
+    answer = _execute_answer(generated, payload, target, schema)
+    if counter and isinstance(answer, JSONResponse) and answer.status_code >= 500:
+        store.refund(counter)  # failed on our side (e.g. the timeout)
+    return answer
 
 
 @app.post("/query/confirm")

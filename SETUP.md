@@ -286,9 +286,11 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | `UPLOAD_TOTAL_MB` | no | All uploaded workspaces together. Default `300`, so uploads never crowd the demo out of Neon's free 0.5 GB. |
 | `MAX_RESULT_ROWS` | no | Rows returned for one answer. Default `1000`; a bigger result is cut, with `result.truncated: true` and a warning. |
 | `GOOGLE_CLIENT_ID` | for sign-in | The OAuth **Web application** client ID from Google Cloud (`….apps.googleusercontent.com`). Not a secret. Without it (or `SESSION_SECRET`) `POST /auth/google` returns 503 and nobody can sign in. |
-| `SESSION_SECRET` | for sign-in | Long random string (`python -c "import secrets; print(secrets.token_urlsafe(48))"`). Signs session tokens and keys the anonymous-visitor hash. Changing it signs everyone out and resets anonymous counts. |
+| `SESSION_SECRET` | for sign-in | Long random string (`python -c "import secrets; print(secrets.token_urlsafe(48))"`). Signs session tokens and answers' plan tokens (quick tweaks), and keys the anonymous-visitor hash. Changing it signs everyone out, resets anonymous counts, and stored answers can no longer be adjusted (they still reopen). |
 | `DAILY_QUESTION_LIMIT` | no | Questions per signed-in user per UTC day. Default `20`. |
 | `ANON_DAILY_QUESTION_LIMIT` | no | Free questions per day for signed-out visitors (app and landing console together). Default `3`. |
+| `TWEAK_DAILY_LIMIT` | no | Adjusted runs (quick tweaks) per signed-in user per UTC day. Default `200`. They make no model call, so they don't use questions, but each is a database query. |
+| `ANON_TWEAK_DAILY_LIMIT` | no | The same for signed-out visitors. Default `50`. |
 | `CLIENT_IP_HEADER` | on Render | A header the proxy in front sets itself, used as the visitor's IP for the free-question count. **On Render set `True-Client-IP`.** Measured 2026-10-18: Render's chain is `client, Cloudflare, Render-internal`, so the rightmost `X-Forwarded-For` entry is a shared internal address; a client-sent `True-Client-IP` is overwritten with the real IP (a forged `CF-Connecting-IP` is rejected by Cloudflare with error 1000). |
 | `TRUSTED_PROXY_HOPS` | no | Fallback when `CLIENT_IP_HEADER` is unset or missing: the client IP is read this many entries from the right of `X-Forwarded-For`. Default `1`, which fails safe (visitors may share a count, but none can forge one). `0` uses the socket peer. |
 | `QUERYMIND_SERVICE_KEY` | no | Long random string. A request with header `X-Service-Key: <value>` skips the daily limits; the eval harness sends it. Leave unset to disable. |
@@ -485,13 +487,15 @@ the browser and the next sign-in retries. Signing out shows that browser's own
 |---|---|
 | `GET /me/history`, `GET /me/saved` | The account's lists, newest first |
 | `POST /me/history {"entry": ...}` | Add a history entry; only the newest 50 are kept |
-| `PUT /me/saved {"entry": ...}` | Save a query; the same question + clarification replaces the old one; at most 100 (409 beyond) |
+| `PUT /me/saved {"entry": ...}` | Save a query; the same question + clarification + adjustments replaces the old one; at most 100 (409 beyond) |
 | `DELETE /me/history/{id}`, `DELETE /me/saved/{id}` | Remove one entry |
 | `POST /me/import {"history": [...], "saved": [...]}` | Move a browser's entries in; returns `{"imported": {...}, "skipped": n}` |
 
 All need `Authorization: Bearer <session token>`. An entry is the object the app
-shows: `id`, `question`, `resolved` (the clarification answer), timings, and a
-`snapshot` with the SQL, parameters, warnings and at most 200 result rows. The
+shows: `id`, `question`, `resolved` (the clarification answer), `adjusted` (the
+quick tweaks applied, at most 500 characters), timings, and a `snapshot` with the
+SQL, parameters, warnings, explanation, the plan token and tweak controls, and at
+most 200 result rows. The
 server checks those limits (422 otherwise) and refuses request bodies over 8 MB
 (413) before reading them.
 
@@ -623,6 +627,37 @@ A successful answer includes `explanation`: one plain-English sentence describin
 built by `app/explain.py` from the final intent the SQL was generated from (after automatic
 fixes), so it always matches the SQL and needs no model call. The frontend shows it behind the
 SQL panel's Explain button and stores it with history and saved queries.
+
+## Quick tweaks (adjust an answer without asking again)
+
+A successful SELECT/COUNT/aggregate answer also returns:
+
+- `intent_token`: the checked plan the SQL came from, compressed and signed with a key derived
+  from `SESSION_SECRET` (HMAC-SHA256). It names the workspace it belongs to. Not encrypted: it
+  holds only what the SQL and explanation already show.
+- `tweaks`: the controls the plan allows, e.g.
+  `{"id": "agg:0", "kind": "aggregate", "label": "price", "type": "number", "value": "MAX", "options": ["MAX", "MIN", "AVG", "SUM", "COUNT"]}`,
+  `{"id": "sort", "kind": "sort", ...}`, `{"id": "limit", "kind": "limit", "min": 1, "max": 1000, ...}`,
+  `{"id": "where:0", "kind": "filter", "type": "number", "operator": ">", "operators": [...], "value": 100}`.
+  SUM and AVG are offered only for number columns; IN, LIKE, IS NULL, yes/no filters and
+  period comparisons offer no controls.
+
+`POST /query/tweak {"intent_token": "...", "changes": {"agg:0": "MIN", "sort": "asc", "limit": 25, "where:0": {"operator": "<", "value": 250}}}`
+verifies the signature and the caller's access to that workspace, applies only the offered
+changes (values checked by type: numbers, ISO dates, text of 200 characters or fewer) and builds
+the SQL with the normal generator (identifiers checked against the live schema, values as
+parameters, the same read-only role, timeout and row cap). The response is a normal answer plus
+`adjusted` (e.g. `["MIN instead of MAX of price", "lowest first"]`) and a new `intent_token`.
+`{"intent_token": "...", "rerun": true}` runs the plan as it is ("Run again" on an adjusted
+answer). No model call, so no question is used; runs have their own daily count
+(`TWEAK_DAILY_LIMIT` / `ANON_TWEAK_DAILY_LIMIT`, 429 beyond, not counted when nothing ran or
+the server failed). Errors: 400 for a forged or stale token or a change that isn't offered, 422
+when the changed plan can't be built, 503 without `SESSION_SECRET`.
+
+Saved queries are unique per question + clarification + `adjusted`, so an adjusted answer can be
+saved next to its original. On startup `ensure_schema` adds the `adjusted` column to existing
+`saved_queries` tables and swaps the old `(user_id, question, resolved)` unique constraint for
+`saved_queries_one_per_query`; it is idempotent.
 
 ## Request options for `POST /query`
 

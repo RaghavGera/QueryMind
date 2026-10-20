@@ -30,6 +30,7 @@ export default function HistoryCard({ entry, onReopen, onRerun, onDelete, delete
           {tag && <Badge tone="warning">{tag}</Badge>}
           {entry.status && <Badge tone={statusTone[entry.status]}>{statusLabel[entry.status]}</Badge>}
           {entry.resolved && <span>Clarified: {entry.resolved}</span>}
+          {entry.adjusted && <span className="max-w-[16rem] truncate" title={entry.adjusted}>Adjusted: {entry.adjusted}</span>}
           {snapshot && <span>{rowCount} row{rowCount === 1 ? "" : "s"}</span>}
           {when && <span>{entry.savedAt ? "Saved " : ""}{relativeTime(when)}</span>}
           {entry.durationMs != null && <span>{formatDuration(entry.durationMs)}</span>}

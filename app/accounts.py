@@ -62,10 +62,11 @@ CREATE TABLE IF NOT EXISTS querymind_meta.saved_queries (
     id       TEXT NOT NULL,
     question TEXT NOT NULL,
     resolved TEXT NOT NULL DEFAULT '',  -- the clarification answer; '' when there was none
+    adjusted TEXT NOT NULL DEFAULT '',  -- quick tweaks applied ("MIN instead of MAX of price"); '' when none
     at       TIMESTAMPTZ NOT NULL,
     entry    JSONB NOT NULL,
     PRIMARY KEY (user_id, id),
-    UNIQUE (user_id, question, resolved)
+    CONSTRAINT saved_queries_one_per_query UNIQUE (user_id, question, resolved, adjusted)
 );
 CREATE TABLE IF NOT EXISTS querymind_meta.clarification_tickets (
     token_hash TEXT PRIMARY KEY,  -- sha256 of the ticket; the ticket itself is never stored
@@ -73,6 +74,25 @@ CREATE TABLE IF NOT EXISTS querymind_meta.clarification_tickets (
     expires_at TIMESTAMPTZ NOT NULL,
     used_at    TIMESTAMPTZ
 );
+"""
+
+
+# Tables created by earlier versions, brought up to date (each step is a no-op once applied).
+MIGRATIONS = """
+-- 2026-10-20: a tweaked answer can be saved next to the original question.
+ALTER TABLE querymind_meta.saved_queries ADD COLUMN IF NOT EXISTS adjusted TEXT NOT NULL DEFAULT '';
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'saved_queries_user_id_question_resolved_key'
+               AND conrelid = 'querymind_meta.saved_queries'::regclass) THEN
+        ALTER TABLE querymind_meta.saved_queries DROP CONSTRAINT saved_queries_user_id_question_resolved_key;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'saved_queries_one_per_query'
+                   AND conrelid = 'querymind_meta.saved_queries'::regclass) THEN
+        ALTER TABLE querymind_meta.saved_queries
+            ADD CONSTRAINT saved_queries_one_per_query UNIQUE (user_id, question, resolved, adjusted);
+    END IF;
+END $$;
 """
 
 
@@ -106,6 +126,7 @@ class AccountStore:
     def ensure_schema(self) -> None:
         with self.db.get_connection() as conn:
             conn.execute(DDL)
+            conn.execute(MIGRATIONS)
 
     # Users ------------------------------------------------------------- #
     def upsert_google_user(self, sub: str, email: str, name: Optional[str], picture: Optional[str]) -> User:
@@ -260,14 +281,14 @@ class AccountStore:
         Save an entry. Saving the same question + clarification again replaces
         the old one. False (nothing changed) when SAVED_LIMIT others exist.
         """
-        resolved = entry.get("resolved") or ""
+        resolved, adjusted = entry.get("resolved") or "", entry.get("adjusted") or ""
         with self.db.get_connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 DELETE FROM querymind_meta.saved_queries
-                WHERE user_id = %s AND (id = %s OR (question = %s AND resolved = %s))
+                WHERE user_id = %s AND (id = %s OR (question = %s AND resolved = %s AND adjusted = %s))
                 """,
-                (user_id, entry["id"], entry["question"], resolved),
+                (user_id, entry["id"], entry["question"], resolved, adjusted),
             )
             cur.execute("SELECT count(*) AS n FROM querymind_meta.saved_queries WHERE user_id = %s", (user_id,))
             if cur.fetchone()["n"] >= SAVED_LIMIT:
@@ -326,11 +347,12 @@ def _trim_history(cur, user_id: int) -> None:
 def _insert_saved(cur, user_id: int, entry: dict, skip_existing: bool = False) -> int:
     cur.execute(
         """
-        INSERT INTO querymind_meta.saved_queries (user_id, id, question, resolved, at, entry)
-        VALUES (%s, %s, %s, %s, %s, %s)
+        INSERT INTO querymind_meta.saved_queries (user_id, id, question, resolved, adjusted, at, entry)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         """
         + (" ON CONFLICT DO NOTHING" if skip_existing else ""),
-        (user_id, entry["id"], entry["question"], entry.get("resolved") or "", _entry_time(entry, "savedAt"), Jsonb(entry)),
+        (user_id, entry["id"], entry["question"], entry.get("resolved") or "", entry.get("adjusted") or "",
+         _entry_time(entry, "savedAt"), Jsonb(entry)),
     )
     return cur.rowcount
 
@@ -349,6 +371,9 @@ def clean_entry(raw) -> Optional[dict]:
     if not isinstance(question, str) or not 0 < len(question.strip()) <= 2000:
         return None
     if resolved is not None and not isinstance(resolved, str):
+        return None
+    adjusted = raw.get("adjusted")
+    if adjusted is not None and (not isinstance(adjusted, str) or len(adjusted) > 500):
         return None
     snapshot = raw.get("snapshot")
     if snapshot is not None and (not isinstance(snapshot, dict) or len(snapshot.get("rows") or []) > 200):
