@@ -9,6 +9,7 @@ This module handles:
 
 import os
 import re
+import threading
 from contextlib import contextmanager
 from typing import Any, Generator, List, Dict
 
@@ -16,6 +17,7 @@ import psycopg
 from psycopg import Connection, sql
 from psycopg.conninfo import make_conninfo
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -50,6 +52,25 @@ def query_timeout_ms() -> int:
 def max_result_rows() -> int:
     """Rows returned for one answer (env MAX_RESULT_ROWS, default 1000); more are flagged as capped."""
     return int(_positive_env("MAX_RESULT_ROWS", 1000))
+
+
+def pool_max_size() -> int:
+    """Open connections at most (env DB_POOL_MAX_SIZE, default 10); more requests wait for one."""
+    return int(_positive_env("DB_POOL_MAX_SIZE", 10))
+
+
+# An unused connection is closed after this long, one per interval, down to none:
+# the pool never opens a connection on its own, so an idle site lets Neon's free
+# compute scale to zero (Neon closes idle connections when it does).
+POOL_MAX_IDLE_SECONDS = 60
+# How long a request waits for a free connection before failing.
+POOL_WAIT_SECONDS = 15
+
+
+def _reset_connection(conn: Connection) -> None:
+    """Back to defaults when a connection returns to the pool (nothing here should change them)."""
+    conn.read_only = None
+    conn.autocommit = False
 
 
 class DatabaseConfig:
@@ -90,11 +111,46 @@ class Database:
 
     Provides connection pooling and safe query execution.
     All queries return results as dictionaries for easier handling.
+
+    Connections are reused from a pool (opening one costs a TLS handshake,
+    which queued requests up on a small server). Everything a request changes
+    on a connection is local to its transaction (statement timeout,
+    search_path, SET LOCAL ROLE, READ ONLY), so nothing carries over to the
+    next request that gets the same connection.
     """
 
     def __init__(self, config: DatabaseConfig):
         self.config = config
-        self._connection_pool = None
+        self._pool: ConnectionPool = None
+        self._pool_lock = threading.Lock()
+
+    def _get_pool(self) -> ConnectionPool:
+        """The pool, created on first use (tests and scripts that never query open nothing)."""
+        if self._pool is None:
+            with self._pool_lock:
+                if self._pool is None:
+                    self._pool = ConnectionPool(
+                        self.config.connection_string,
+                        # Rows as dictionaries; an unreachable server fails one attempt after 10 s.
+                        kwargs={"row_factory": dict_row, "connect_timeout": 10},
+                        min_size=0,
+                        max_size=pool_max_size(),
+                        max_idle=POOL_MAX_IDLE_SECONDS,
+                        timeout=POOL_WAIT_SECONDS,
+                        # Neon closes idle connections when it scales to zero: test each one before use.
+                        check=ConnectionPool.check_connection,
+                        reset=_reset_connection,
+                        name="querymind",
+                        open=True,
+                    )
+        return self._pool
+
+    def close(self) -> None:
+        """Close every pooled connection (application shutdown)."""
+        with self._pool_lock:
+            if self._pool is not None:
+                self._pool.close()
+                self._pool = None
 
     def test_connection(self) -> bool:
         """
@@ -104,11 +160,10 @@ class Database:
             True if connection successful, False otherwise
         """
         try:
-            with psycopg.connect(self.config.connection_string) as conn:
+            with self.get_connection() as conn:
                 with conn.cursor() as cur:
-                    cur.execute("SELECT 1")
-                    result = cur.fetchone()
-                    return result[0] == 1
+                    cur.execute("SELECT 1 AS ok")
+                    return cur.fetchone()["ok"] == 1
         except Exception as e:
             print(f"Connection test failed: {e}")
             return False
@@ -118,26 +173,21 @@ class Database:
         """
         Context manager for database connections.
 
-        Yields a connection that automatically commits on success
-        and rolls back on error.
+        Yields a pooled connection that automatically commits on success
+        and rolls back on error, then goes back to the pool.
 
         Usage:
             with db.get_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute("SELECT * FROM customers")
         """
-        conn = psycopg.connect(
-            self.config.connection_string,
-            row_factory=dict_row  # Return rows as dictionaries
-        )
-        try:
-            yield conn
-            conn.commit()
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        with self._get_pool().connection() as conn:
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
 
     def execute_query(
         self,
@@ -185,8 +235,10 @@ class Database:
                 raise ValueError(f"Not a valid schema or role name: {name!r}")
 
         with self.get_connection() as conn:
-            conn.read_only = True  # the transaction starts as BEGIN READ ONLY
             with conn.cursor() as cur:
+                # First statement of the transaction, so it applies to all of it, and
+                # ends with it: the pooled connection is not left read-only.
+                cur.execute("SET TRANSACTION READ ONLY")
                 # A bound parameter can't be used with SET; set_config can. Local to this transaction.
                 if search_path:
                     cur.execute(
@@ -241,31 +293,22 @@ class Database:
         if keyword == "UPDATE" and " WHERE " not in f" {statement.upper()} ":
             raise ValueError("Refusing to run an UPDATE without a WHERE clause.")
 
-        conn = psycopg.connect(self.config.connection_string)
-        try:
+        with self.get_connection() as conn:  # commits on return, rolls back on any error
             with conn.cursor() as cur:
                 cur.execute("SELECT set_config('statement_timeout', %s, true)", (str(query_timeout_ms()),))
                 try:
                     cur.execute(statement, params or None)
                 except psycopg.errors.QueryCanceled as exc:
-                    conn.rollback()
                     raise QueryTimeoutError(
                         f"The change took longer than {query_timeout_ms() / 1000:g} s and was stopped; nothing was changed."
                     ) from exc
                 affected = cur.rowcount
             if expected_rows is not None and affected != expected_rows:
-                conn.rollback()
                 raise WriteConflictError(
                     f"The statement would now affect {affected} row(s) instead of the "
                     f"{expected_rows} previewed; nothing was changed."
                 )
-            conn.commit()
             return affected
-        except Exception:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
 
     def execute_single(self, query: str, params: tuple = None) -> Dict[str, Any]:
         """

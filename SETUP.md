@@ -158,14 +158,15 @@ Phase 1 is ready!
 {
   "status": "healthy",
   "database": {
-    "host": "localhost",
-    "port": 5432,
     "database": "text_to_sql",
     "connected": true
   },
-  "writes_enabled": false
+  "writes_enabled": false,
+  "query_roles": true
 }
 ```
+
+`/health` is public, so it does not include the database host or port.
 
 ### /schema/tables endpoint
 
@@ -277,8 +278,9 @@ Backend (`.env` locally; the service's Environment screen on Render):
 | `GROQ_MODEL` | no | Default `qwen/qwen3.8-27b`. Older copies of `.env.example` suggested `llama-3.1-70b-versatile`; make sure a stale value is not set. |
 | `LLM_TIMEOUT_SECONDS` | no | Per-request LLM timeout before failing over to the next entry. Default `12`. |
 | `LOG_LEVEL` | no | Python log level for the app (default `INFO`). At `INFO` every request logs `LLM request served provider=... seconds=...`. |
-| `BACKEND_CORS_ORIGINS` | no | Comma-separated; defaults include `http://localhost:5173` and the Vercel URL. |
-| `BACKEND_CORS_ORIGIN_REGEX` | no | Origins matched by pattern as well. Default allows this project's Vercel deployment URLs (`https://query-mind-….vercel.app`) and `http://localhost:<port>` / `http://127.0.0.1:<port>`. Set to an empty string to disable. |
+| `BACKEND_CORS_ORIGINS` | no | Comma-separated exact origins; defaults are the production frontend (`https://query-mind-tawny.vercel.app`) and `http://localhost:5173` / `:4173`. To test a Vercel preview against this backend, add its exact URL here. |
+| `BACKEND_CORS_ORIGIN_REGEX` | no | Origins matched by pattern as well. Default: `http://localhost:<port>` and `http://127.0.0.1:<port>` only. Vercel deployment URLs are deliberately not matched by pattern: any Vercel account can name a project `query-mind-<anything>` and be served at `https://query-mind-<anything>.vercel.app` (security review 2026-10-24). Set to an empty string to disable. |
+| `DB_POOL_MAX_SIZE` | no | Database connections the backend keeps open at most. Default `10`; more simultaneous requests wait (up to 15 s) for a free one. Unused connections close after 60 s, one at a time, down to none, so Neon's free compute can still scale to zero. |
 | `QUERYMIND_ENABLE_WRITES` | no | `true` allows confirmed natural-language INSERT/UPDATE. **Off by default** - leave it off on a public demo database. |
 | `QUERYMIND_CONFIRM_SECRET` | with writes | Long random string; keeps confirmation tokens valid across restarts/instances. |
 | `QUERY_TIMEOUT_SECONDS` | no | Statement timeout for every query and confirmed write. Default `8`. A question that runs longer gets a 504 and is not counted. |
@@ -457,7 +459,12 @@ Sign-in flow:
 `DAILY_QUESTION_LIMIT` for signed-in users, `ANON_DAILY_QUESTION_LIMIT` for
 signed-out visitors (by a keyed hash of their IP; raw IPs are never stored).
 `/query/confirm` needs sign-in. The count is taken atomically before the
-pipeline runs and refunded if the request fails on our side (5xx). Every counted
+pipeline runs and refunded if the request fails on our side (5xx, or 429 from
+the model), or if it is refused before the model is asked: invalid JSON, an
+empty question, a question over 1,000 characters (clarification answers: 500),
+or a workspace the caller can't use. Bodies over 64 KB on `/query`,
+`/query/confirm` and `/query/tweak` get **413** before anything is read or
+counted. Every counted
 response carries `X-Usage-Scope`, `X-Usage-Used` and `X-Usage-Limit`; over the
 limit the API returns **429** with `{"error", "usage", "quota_exceeded": true}`.
 `GET /auth/usage` returns today's count for whoever is calling.
@@ -534,6 +541,20 @@ the rows are cut to `MAX_RESULT_ROWS`, and a warning says so. A timeout returns
 The endpoints are plain functions, so FastAPI runs them in its thread pool and
 a slow model or database call doesn't block other requests. Measured with two
 simultaneous questions that each take 1 s: 2.08 s before, 1.06 s after.
+
+Connections come from a pool (`psycopg_pool`, at most `DB_POOL_MAX_SIZE`).
+Opening one per request cost a TLS handshake each time, which queued up on a
+small server. Everything a request sets on a connection is local to its
+transaction (`SET TRANSACTION READ ONLY`, `statement_timeout`, `search_path`,
+`SET LOCAL ROLE`), so the next request on the same connection starts clean
+(`testing/test_pool_db.py` checks this on one reused session). Each connection
+is tested before use, because Neon closes idle ones when it scales to zero.
+
+Every API response carries `Strict-Transport-Security`, `X-Content-Type-Options:
+nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`,
+`Cache-Control: no-store` and `Content-Security-Policy: default-src 'none';
+frame-ancestors 'none'` (the interactive `/docs` and `/redoc` skip the CSP:
+they load Swagger UI and ReDoc from a CDN).
 
 ## Workspaces
 

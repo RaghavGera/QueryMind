@@ -28,6 +28,7 @@ export default function QueryInput({ onSubmit, disabled, initialValue = "", auto
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}
         placeholder="Ask anything about your data..."
+        maxLength={1000} // the backend's MAX_QUESTION_CHARS
         aria-label="Your question"
         className="flex-1 bg-transparent font-display text-[15px] text-ink caret-accent-cyan outline-none placeholder:text-ink-faint sm:text-base"
       />

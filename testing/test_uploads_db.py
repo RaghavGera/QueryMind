@@ -217,6 +217,7 @@ def test_the_import_works_for_a_non_superuser_owner_like_neon(db):
     finally:
         if workspace is not None:
             store.delete(user.id, workspace.id)
+        as_owner.close()  # its pooled sessions end before the role is dropped
         with db.get_connection() as conn:
             conn.execute("DELETE FROM querymind_meta.users WHERE id = %s", (user.id,))
             conn.execute(psql.SQL("DROP OWNED BY {} CASCADE").format(psql.Identifier(owner)))

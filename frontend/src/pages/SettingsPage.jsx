@@ -68,7 +68,7 @@ export default function SettingsPage() {
         <h2 className="mb-3 text-sm font-medium text-ink">Database connection</h2>
         <div className="flex items-center justify-between rounded-lg border border-line bg-white/[0.02] px-4 py-3 text-sm">
           <div>
-            <p className="text-ink">{health?.database?.database || "sample_ecommerce_db"}</p>
+            <p className="text-ink">{health?.database?.database || "Database"}</p>
             <p className="text-xs text-ink-faint">
               PostgreSQL · {serverWrites ? "writes allowed (with confirmation)" : "read-only mode"}
             </p>

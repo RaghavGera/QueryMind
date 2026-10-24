@@ -162,6 +162,7 @@ def test_roles_work_for_a_non_superuser_owner_like_neon(db):
         conn.execute(psql.SQL("CREATE ROLE {} LOGIN CREATEROLE PASSWORD {}").format(psql.Identifier(owner), psql.Literal(password)))
         conn.execute(psql.SQL("GRANT USAGE ON SCHEMA public TO {} WITH GRANT OPTION").format(psql.Identifier(owner)))
         conn.execute(psql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA public TO {} WITH GRANT OPTION").format(psql.Identifier(owner)))
+    as_owner = None
     try:
         config = DatabaseConfig()
         config.user, config.password = owner, password
@@ -173,6 +174,8 @@ def test_roles_work_for_a_non_superuser_owner_like_neon(db):
         rows = as_owner.execute_query("SELECT count(*) AS n FROM customers", role=demo_role)
         assert rows[0]["n"] > 0
     finally:
+        if as_owner is not None:
+            as_owner.close()  # its pooled sessions end before the role is dropped
         _drop_stand_in_roles(db, owner, demo_role)
 
 

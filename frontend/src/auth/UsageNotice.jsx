@@ -12,10 +12,13 @@ export function TriesLeft({ usage, signedIn }) {
   const left = remaining(usage);
   if (left === null) return null;
   return (
+    // Each half stays on one line, so a narrow screen breaks between them, not mid-phrase.
     <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-ink-faint">
-      {signedIn ? `${left} of ${usage.limit} questions left today` : `${left} free question${left === 1 ? "" : "s"} left today · `}
+      <span className="whitespace-nowrap">
+        {signedIn ? `${left} of ${usage.limit} questions left today` : `${left} free question${left === 1 ? "" : "s"} left today · `}
+      </span>{" "}
       {!signedIn && (
-        <Link to={signInPath(location)} className="text-accent-cyan hover:underline">
+        <Link to={signInPath(location)} className="whitespace-nowrap text-accent-cyan hover:underline">
           sign in for {usage.user_limit ?? 20} a day
         </Link>
       )}

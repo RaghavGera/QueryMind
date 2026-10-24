@@ -76,12 +76,14 @@ cors_origins = [
     if origin.strip()
 ]
 
-# Vercel also serves every deployment at its own URL (query-mind-<hash>-....vercel.app,
-# query-mind-git-<branch>-....vercel.app). A browser on one of those, or on a local dev
-# server at 127.0.0.1, was refused by CORS and showed "Could not reach the backend".
+# Only local dev servers on any port by pattern. Vercel's own deployment URLs
+# (query-mind-<hash>-<team>.vercel.app) are NOT matched by default: any Vercel
+# account can name a project "query-mind-<anything>" and be served at that
+# address, so a pattern can't tell our previews from someone else's site. Add a
+# preview you need to BACKEND_CORS_ORIGINS by its exact URL.
 cors_origin_regex = os.getenv(
     "BACKEND_CORS_ORIGIN_REGEX",
-    r"https://query-mind(-[a-z0-9-]+)?\.vercel\.app|http://(localhost|127\.0\.0\.1):\d+",
+    r"http://(localhost|127\.0\.0\.1):\d+",
 ) or None
 
 # --------------------------------------------------------------------------- #
@@ -179,6 +181,18 @@ def _usage_headers(usage: dict) -> dict:
     return headers
 
 
+def _give_back(request: Request, response) -> bool:
+    """
+    The question isn't charged when the server or the model failed (5xx, 429), or
+    when the request was refused before the model was asked: invalid JSON, a
+    question that is empty or too long, a workspace the caller can't use.
+    /query sets ``request.state.answering`` just before it starts work.
+    """
+    if response.status_code >= 500 or response.status_code == 429:
+        return True
+    return not getattr(request.state, "answering", False)
+
+
 @app.middleware("http")
 async def usage_limits(request: Request, call_next):
     if request.method != "POST" or request.url.path not in _LIMITED_PATHS:
@@ -211,7 +225,7 @@ async def usage_limits(request: Request, call_next):
     if ticket and await run_in_threadpool(store.redeem_ticket, ticket, principal.subject):
         # Answering a clarification of a question already counted: free.
         response = await call_next(request)
-        if response.status_code >= 500 or response.status_code == 429:
+        if _give_back(request, response):
             await run_in_threadpool(store.restore_ticket, ticket)
         used = await run_in_threadpool(store.used_today, principal.subject)
         for key, value in _usage_headers(_usage_payload(principal, used, limit)).items():
@@ -235,8 +249,7 @@ async def usage_limits(request: Request, call_next):
 
     request.state.charged_subject = principal.subject  # lets /query issue a clarification ticket
     response = await call_next(request)
-    if response.status_code >= 500 or response.status_code == 429:
-        # The model or server failed, not the user: give the question back.
+    if _give_back(request, response):
         await run_in_threadpool(store.refund, principal.subject)
         used -= 1
     for key, value in _usage_headers(_usage_payload(principal, used, limit)).items():
@@ -250,25 +263,61 @@ MAX_ACCOUNT_BODY_BYTES = 8_000_000  # an import of 50 + 100 entries with results
 # Files up to uploads.MAX_TOTAL_BYTES, plus room for the multipart wrapping and the plan.
 MAX_UPLOAD_BODY_BYTES = uploads.MAX_TOTAL_BYTES + 1024 * 1024
 
+# A question (MAX_QUESTION_CHARS), a plan token or a confirmation token is a few KB.
+MAX_QUERY_BODY_BYTES = 64 * 1024
+_QUERY_PATHS = {"/query", "/query/confirm", "/query/tweak"}
+
 
 @app.middleware("http")
 async def account_body_limit(request: Request, call_next):
-    """History, saved queries and uploads are stored as sent, so refuse oversized bodies before reading them."""
+    """
+    Refuse oversized bodies before reading them: history, saved queries and uploads
+    are stored as sent, and questions go to the model. Registered after (so
+    outside) usage_limits: a refused body doesn't use a question.
+    """
     limit = None
     if request.method in ("POST", "PUT"):
         if request.url.path.startswith("/me/"):
             limit = MAX_ACCOUNT_BODY_BYTES
         elif request.url.path.startswith("/workspaces/uploads"):
             limit = MAX_UPLOAD_BODY_BYTES
+        elif request.url.path in _QUERY_PATHS:
+            limit = MAX_QUERY_BODY_BYTES
     if limit is not None:
         length = request.headers.get("content-length")
         if length is None or not length.isdigit() or int(length) > limit:
-            message = (
-                f"The files are too large; the limit is {uploads.MAX_TOTAL_BYTES // 1048576} MB in total."
-                if limit == MAX_UPLOAD_BODY_BYTES else "That request is too large to store."
-            )
+            if limit == MAX_UPLOAD_BODY_BYTES:
+                message = f"The files are too large; the limit is {uploads.MAX_TOTAL_BYTES // 1048576} MB in total."
+            elif limit == MAX_QUERY_BODY_BYTES:
+                message = f"That request is too large; questions can be up to {MAX_QUESTION_CHARS:,} characters."
+            else:
+                message = "That request is too large to store."
             return JSONResponse(status_code=413, content={"status": "error", "error": message})
     return await call_next(request)
+
+
+# The API only returns JSON, so nothing may be framed, embedded or run from it.
+# The interactive docs load Swagger UI / ReDoc from a CDN, so they skip the CSP.
+_SECURITY_HEADERS = {
+    "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "no-referrer",
+    "Cache-Control": "no-store",  # answers, history and sessions are per caller
+}
+_API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+_DOCS_PATHS = ("/docs", "/redoc", "/openapi.json")
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    """Registered last before CORS, so 401/413/429 responses from the limits get them too."""
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    if not request.url.path.startswith(_DOCS_PATHS):
+        response.headers.setdefault("Content-Security-Policy", _API_CSP)
+    return response
 
 
 app.add_middleware(
@@ -280,6 +329,9 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Usage-Scope", "X-Usage-Used", "X-Usage-Limit", "Retry-After"],
 )
+
+
+db_instance: Optional[Database] = None
 
 
 @app.on_event("startup")
@@ -303,6 +355,13 @@ async def startup_event():
         threading.Thread(target=_sweep_expired_workspaces, name="workspace-expiry", daemon=True).start()
     except Exception:
         logger.exception("Could not set up workspaces; the demo still runs")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Close the pooled database connections."""
+    if db_instance is not None:
+        db_instance.close()
 
 
 EXPIRY_SWEEP_SECONDS = 30 * 60
@@ -687,6 +746,12 @@ def _schema_context(schema: DatabaseSchema) -> dict:
     }
 
 
+# Generous for a question (the eval's longest is 83 characters) and small for the
+# model: a longer one is refused before it is sent, and doesn't use a question.
+MAX_QUESTION_CHARS = 1000
+MAX_CLARIFICATION_CHARS = 500
+
+
 class QueryRequest(BaseModel):
     question: str
     clarification_context: str | None = None
@@ -742,6 +807,10 @@ def run_query(
             status_code=400,
             content={"error": "Question cannot be empty."}
         )
+    if len(question) > MAX_QUESTION_CHARS:
+        return _error_response(422, f"Questions can be up to {MAX_QUESTION_CHARS:,} characters; please shorten it.")
+    if len((request.clarification_context or "").strip()) > MAX_CLARIFICATION_CHARS:
+        return _error_response(422, f"An answer can be up to {MAX_CLARIFICATION_CHARS:,} characters; please shorten it.")
 
     if request.clarification_context:
         question = (
@@ -756,6 +825,9 @@ def run_query(
     except WorkspaceError as exc:
         return _workspace_error(exc)
 
+    if http_request is not None:
+        # From here the model may be asked, so the question counts (see _give_back).
+        http_request.state.answering = True
     try:
         result = _run_pipeline(question, request, _scoped(db, workspace))
     except Exception as exc:  # Last-resort guard: never leak a traceback.
@@ -1105,9 +1177,9 @@ def health_check(db: Database = Depends(get_db)) -> dict:
 
     return {
         "status": status,
+        # No host or port: this endpoint is public, and the database's address
+        # (provider, region, endpoint) is nobody else's business.
         "database": {
-            "host": db.config.host,
-            "port": db.config.port,
             "database": db.config.database,
             "connected": is_healthy
         },

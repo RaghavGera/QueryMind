@@ -43,6 +43,7 @@ export default function ClarificationPanel({
           onChange={(e) => setAnswer(e.target.value)}
           disabled={!!selectedId}
           placeholder="Type your clarification..."
+          maxLength={500} // the backend's MAX_CLARIFICATION_CHARS
           className="min-w-0 flex-1 rounded-xl border border-white/[0.08] bg-white/[0.03] px-4 py-3 text-sm text-ink caret-accent-amber outline-none placeholder:text-ink-faint focus:border-accent-amber/50"
           autoFocus
         />

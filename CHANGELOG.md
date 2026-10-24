@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+From a non-destructive review of the live site on 2026-10-24 (auth, injection, quota
+bypass, CORS, headers, input handling, six device profiles, 30 parallel requests).
+Nothing allowed a sign-in bypass, injection or quota bypass; these were fixed:
+- **`/health` no longer shows the database host and port.** It is public, and the host
+  named the provider, region and endpoint.
+- **CORS allows exact origins only** (the production frontend and localhost). The pattern
+  `https://query-mind(-…)?.vercel.app` also matched sites anyone can create, because Vercel
+  serves any account's project named `query-mind-<anything>` at that address. Sessions are
+  Bearer tokens, so such a site couldn't act as a signed-in user, but it could spend a
+  visitor's free questions. Add a preview's exact URL to `BACKEND_CORS_ORIGINS` to use it.
+- **Security headers on every API response:** HSTS, `nosniff`, `X-Frame-Options: DENY`,
+  `Referrer-Policy: no-referrer`, `Cache-Control: no-store` and a `default-src 'none'` CSP
+  (not on `/docs` and `/redoc`, which load from a CDN).
+- **Questions are limited to 1,000 characters** (clarification answers to 500), checked
+  before the model is asked, and `/query`, `/query/confirm` and `/query/tweak` refuse bodies
+  over 64 KB with 413 before reading them. A 200 KB question used to go to the model. The
+  inputs in the app stop at the same lengths.
+
+### Fixed
+- **A refused request no longer uses a question.** The count was taken before the request was
+  checked and only given back on 5xx/429, so invalid JSON, a missing or empty question or a
+  workspace the caller can't use each cost a visitor one of their free questions. It's now
+  given back whenever the model wasn't asked.
+- **Database connections are pooled** (`psycopg-pool`, `DB_POOL_MAX_SIZE`, default 10). Every
+  query opened a new connection with its own TLS handshake; 30 simultaneous requests to
+  database endpoints queued to a median of 2.8 s on the live server against 0.5 s for one
+  that doesn't use the database. Reads now set `READ ONLY` per transaction, so nothing
+  carries over between requests on a reused connection; connections closed by Neon when it
+  scales to zero are replaced. The test suite went from about 45 s to 13 s.
+- On phones, the free-questions line breaks between "… left today ·" and "sign in for 20 a
+  day" instead of in the middle of the link.
+- Settings no longer shows a made-up database name ("sample_ecommerce_db") while it loads.
+
 ### Added
 - **Quick tweaks:** every SELECT/COUNT/aggregate answer has an *Adjust this answer* bar with the
   changes its plan allows: the function (Highest / Lowest / Average / Total / Count), the sort

@@ -30,8 +30,6 @@ def _preflight(origin: str) -> httpx.Response:
 
 @pytest.mark.parametrize("origin", [
     "https://query-mind-tawny.vercel.app",
-    "https://query-mind-abc123xyz-raghavoids-projects.vercel.app",
-    "https://query-mind-git-main-raghavoid.vercel.app",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://127.0.0.1:4173",
@@ -47,6 +45,13 @@ def test_frontend_origins_are_allowed(origin):
     "https://query-mind-tawny.vercel.app.evil.com",
     "https://notquery-mind.vercel.app",
     "http://query-mind-tawny.vercel.app",
+    # Any Vercel account can call a project "query-mind-<anything>" and be served
+    # at that address, so deployment-shaped URLs are refused unless listed exactly
+    # in BACKEND_CORS_ORIGINS (security review 2026-10-24).
+    "https://query-mind-evil.vercel.app",
+    "https://query-mind-tawny-git-attacker.vercel.app",
+    "https://query-mind-abc123xyz-raghavoids-projects.vercel.app",
+    "https://query-mind-git-main-raghavoid.vercel.app",
 ])
 def test_other_origins_are_refused(origin):
     response = _preflight(origin)

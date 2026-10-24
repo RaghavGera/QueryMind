@@ -5,6 +5,7 @@ confirmation token -> guarded execution. No network or database needed.
 
 import json
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -12,7 +13,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pytest
 from fastapi.responses import JSONResponse
 
-import app.database as database
 import app.main as main_module
 from app import writes
 from app.ambiguity_detector import AmbiguityDetector
@@ -123,9 +123,23 @@ def real_db(monkeypatch):
     return Database(DatabaseConfig())
 
 
+class _FakePool:
+    """Hands out one fake connection, like ConnectionPool.connection(), and records its return."""
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    @contextmanager
+    def connection(self):
+        try:
+            yield self.conn
+        finally:
+            self.conn.closed = True  # back to the pool
+
+
 def _patch_connect(monkeypatch, rowcount):
     conn = _FakeConnection(rowcount)
-    monkeypatch.setattr(database.psycopg, "connect", lambda *a, **k: conn)
+    monkeypatch.setattr(Database, "_get_pool", lambda self: _FakePool(conn))
     return conn
 
 
